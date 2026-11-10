@@ -6,6 +6,8 @@ package hatest
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"sync"
 
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 )
@@ -19,8 +21,8 @@ type ServiceCall struct {
 }
 
 // Fake is an in-memory ha.Client. Set the registry fields before use; read
-// Calls to assert the service call sequence. Emit delivers an event to
-// subscribers.
+// Calls (or ServiceCalls, when calls run on other goroutines) to assert the
+// service call sequence. Emit delivers an event to subscribers.
 type Fake struct {
 	AreaList   []ha.Area
 	DeviceList []ha.Device
@@ -30,20 +32,92 @@ type Fake struct {
 	Calls      []ServiceCall
 
 	// Respond, if set, returns the response and error for a service call.
+	// The call is recorded either way.
 	Respond func(ServiceCall) (json.RawMessage, error)
+
+	mu   sync.Mutex
+	subs map[string][]*sub
+}
+
+type sub struct {
+	ctx context.Context
+	fn  func(ha.Event)
 }
 
 var _ ha.Client = (*Fake)(nil)
 
-// Emit delivers ev to every subscriber of ev.EventType.
-func (f *Fake) Emit(ev ha.Event) { panic("TODO: track A") }
+// Emit delivers ev to every live subscriber of ev.EventType, synchronously,
+// in subscription order.
+func (f *Fake) Emit(ev ha.Event) {
+	f.mu.Lock()
+	subs := slices.Clone(f.subs[ev.EventType])
+	f.mu.Unlock()
+	for _, s := range subs {
+		if s.ctx.Err() == nil {
+			s.fn(ev)
+		}
+	}
+}
+
+// EmitData is Emit with data marshaled to JSON.
+func (f *Fake) EmitData(eventType string, data any) {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		panic(err)
+	}
+	f.Emit(ha.Event{EventType: eventType, Data: raw})
+}
+
+// Subscribers returns the number of live subscribers of eventType.
+func (f *Fake) Subscribers(eventType string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, s := range f.subs[eventType] {
+		if s.ctx.Err() == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// ServiceCalls returns a copy of the recorded calls. Safe for concurrent use.
+func (f *Fake) ServiceCalls() []ServiceCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.Calls)
+}
+
+// Reset clears the recorded calls.
+func (f *Fake) Reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = nil
+}
 
 func (f *Fake) SubscribeEvents(ctx context.Context, eventType string, fn func(ha.Event)) error {
-	panic("TODO: track A")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.subs == nil {
+		f.subs = make(map[string][]*sub)
+	}
+	f.subs[eventType] = append(f.subs[eventType], &sub{ctx: ctx, fn: fn})
+	return nil
 }
 
 func (f *Fake) CallService(ctx context.Context, domain, service string, data map[string]any, target *ha.Target, returnResponse bool) (json.RawMessage, error) {
-	panic("TODO: track A")
+	call := ServiceCall{Domain: domain, Service: service, Data: data, Target: target, ReturnResponse: returnResponse}
+	f.mu.Lock()
+	f.Calls = append(f.Calls, call)
+	respond := f.Respond
+	f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if respond != nil {
+		return respond(call)
+	}
+	return nil, nil
 }
 
 func (f *Fake) Areas(ctx context.Context) ([]ha.Area, error)      { return f.AreaList, nil }

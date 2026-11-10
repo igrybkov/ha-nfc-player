@@ -1,0 +1,207 @@
+package musicassistant
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/igrybkov/ha-nfc-player/internal/catalog"
+	"github.com/igrybkov/ha-nfc-player/internal/ha"
+	"github.com/igrybkov/ha-nfc-player/internal/ha/hatest"
+	"github.com/igrybkov/ha-nfc-player/internal/model"
+	"github.com/igrybkov/ha-nfc-player/internal/player"
+	"github.com/igrybkov/ha-nfc-player/internal/player/sonos"
+	"github.com/igrybkov/ha-nfc-player/internal/rooms"
+)
+
+type settings struct{ s model.Settings }
+
+func (s *settings) Settings() model.Settings { return s.s }
+
+func defaults() *settings { return &settings{model.DefaultSettings()} }
+
+var office = rooms.Area{ID: "office", SonosEntity: "media_player.office", MAEntity: "media_player.office_ma", Volume: 15}
+
+func maTarget() *ha.Target { return &ha.Target{EntityID: []string{"media_player.office_ma"}} }
+
+func entities() []ha.Entity {
+	return []ha.Entity{
+		{EntityID: "media_player.office", Platform: "sonos", ConfigEntryID: "sonos-entry"},
+		{EntityID: "media_player.kitchen_ma", Platform: "music_assistant", ConfigEntryID: "ma-other"},
+		{EntityID: "media_player.office_ma", Platform: "music_assistant", ConfigEntryID: "ma-entry"},
+	}
+}
+
+// searchResult is a music_assistant.search response with a library hit
+// first, as MA returns it.
+const searchResult = `{
+  "artists": [],
+  "albums": [
+    {"media_type": "album", "uri": "library://album/17", "name": "Divisive", "provider": "library"},
+    {"media_type": "album", "uri": "apple_music://album/1646032515", "name": "Divisive", "provider": "apple_music"}
+  ],
+  "playlists": [
+    {"media_type": "playlist", "uri": "apple_music://playlist/pl.abc", "name": "Divisive Mix"}
+  ],
+  "tracks": []
+}`
+
+func TestPlayAlbumSequence(t *testing.T) {
+	f := &hatest.Fake{}
+	p := New(f, defaults())
+	m, _ := catalog.Parse("https://music.apple.com/us/album/divisive/1646032515")
+	req := player.Request{Media: m, Area: office, Volume: 20, Shuffle: true, Repeat: "off"}
+	if !p.Supports(req) {
+		t.Fatal("album not supported")
+	}
+	if err := p.Play(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	want := []hatest.ServiceCall{
+		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.2}, Target: maTarget()},
+		{Domain: "music_assistant", Service: "play_media", Data: map[string]any{
+			"media_id": "apple_music://album/1646032515", "media_type": "album", "enqueue": "replace",
+		}, Target: maTarget()},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: maTarget()},
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "off"}, Target: maTarget()},
+	}
+	if !reflect.DeepEqual(f.Calls, want) {
+		t.Errorf("calls:\n got %+v\nwant %+v", f.Calls, want)
+	}
+}
+
+func TestPlayQuerySearchesThenPlays(t *testing.T) {
+	f := &hatest.Fake{EntityList: entities(), Respond: func(c hatest.ServiceCall) (json.RawMessage, error) {
+		if c.Service == "search" {
+			return json.RawMessage(searchResult), nil
+		}
+		return nil, nil
+	}}
+	p := New(f, defaults())
+	req := player.Request{Query: &player.Query{Artist: "Disturbed", Album: "Divisive"}, Area: office, Volume: 15}
+	if err := p.Play(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	search := f.Calls[0]
+	wantSearch := hatest.ServiceCall{Domain: "music_assistant", Service: "search", ReturnResponse: true, Data: map[string]any{
+		"config_entry_id": "ma-entry", // the entry of the area's MA entity
+		"name":            "Divisive",
+		"artist":          "Disturbed",
+		"media_type":      []string{"album", "playlist"},
+		"limit":           SearchLimit,
+	}}
+	if !reflect.DeepEqual(search, wantSearch) {
+		t.Errorf("search call:\n got %+v\nwant %+v", search, wantSearch)
+	}
+	if got := f.Calls[2].Data["media_id"]; got != "apple_music://album/1646032515" {
+		t.Errorf("play_media media_id = %v (library:// must be skipped)", got)
+	}
+	if len(f.Calls) != 5 {
+		t.Errorf("got %d calls, want search + 4", len(f.Calls))
+	}
+}
+
+func TestSearch(t *testing.T) {
+	respond := func(body string) func(hatest.ServiceCall) (json.RawMessage, error) {
+		return func(hatest.ServiceCall) (json.RawMessage, error) { return json.RawMessage(body), nil }
+	}
+	q := player.Query{Artist: "Metallica", Album: "Essential"}
+
+	t.Run("playlist when no album", func(t *testing.T) {
+		f := &hatest.Fake{EntityList: entities(), Respond: respond(`{"albums":[{"uri":"library://album/1"}],"playlists":[{"uri":"apple_music://playlist/pl.e55d"}]}`)}
+		m, err := New(f, defaults()).Search(context.Background(), office, q)
+		if err != nil || m.Kind != catalog.KindPlaylist || m.ID != "pl.e55d" {
+			t.Fatalf("Search = %+v, %v", m, err)
+		}
+		if m.ShareURL() != "https://music.apple.com/us/playlist/playlist-pl.e55d/pl.e55d" {
+			t.Errorf("ShareURL = %s", m.ShareURL())
+		}
+	})
+	t.Run("nothing found", func(t *testing.T) {
+		f := &hatest.Fake{EntityList: entities(), Respond: respond(`{"albums":[],"playlists":[]}`)}
+		_, err := New(f, defaults()).Search(context.Background(), office, q)
+		if !errors.Is(err, player.ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	})
+	t.Run("config entry from settings", func(t *testing.T) {
+		f := &hatest.Fake{Respond: respond(searchResult)}
+		s := defaults()
+		id := "01JEADXBMRS3ATRJJKFG8YQH9D"
+		s.s.MusicAssistant.ConfigEntryID = &id
+		if _, err := New(f, s).Search(context.Background(), office, q); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.Calls[0].Data["config_entry_id"]; got != id {
+			t.Errorf("config_entry_id = %v", got)
+		}
+	})
+	t.Run("config entry from any MA entity", func(t *testing.T) {
+		f := &hatest.Fake{EntityList: entities(), Respond: respond(searchResult)}
+		if _, err := New(f, defaults()).Search(context.Background(), rooms.Area{ID: "garage"}, q); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.Calls[0].Data["config_entry_id"]; got != "ma-other" {
+			t.Errorf("config_entry_id = %v", got)
+		}
+	})
+	t.Run("no config entry", func(t *testing.T) {
+		f := &hatest.Fake{}
+		_, err := New(f, defaults()).Search(context.Background(), office, q)
+		if !errors.Is(err, ErrNoConfigEntry) || len(f.Calls) != 0 {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
+func TestSupports(t *testing.T) {
+	p := New(&hatest.Fake{}, defaults())
+	noMA := rooms.Area{ID: "x", SonosEntity: "media_player.x"}
+	tests := []struct {
+		name string
+		req  player.Request
+		want bool
+	}{
+		{"album", player.Request{Media: catalog.Media{Kind: catalog.KindAlbum, ID: "1"}, Area: office}, true},
+		{"station", player.Request{Media: catalog.Media{Kind: catalog.KindStation, ID: "ra.1"}, Area: office}, true},
+		{"query", player.Request{Query: &player.Query{}, Area: office}, true},
+		{"unknown kind", player.Request{Media: catalog.Media{Kind: catalog.KindUnknown, ID: "1"}, Area: office}, false},
+		{"empty media", player.Request{Area: office}, false},
+		{"no MA entity", player.Request{Query: &player.Query{}, Area: noMA}, false},
+	}
+	for _, tt := range tests {
+		if got := p.Supports(tt.req); got != tt.want {
+			t.Errorf("%s: Supports = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+// The router hands a Query to Sonos after MA resolved it: one search, then
+// the Sonos sequence with the share link.
+func TestRouterQueryOnSonos(t *testing.T) {
+	f := &hatest.Fake{EntityList: entities(), Respond: func(c hatest.ServiceCall) (json.RawMessage, error) {
+		if c.Service == "search" {
+			return json.RawMessage(searchResult), nil
+		}
+		return nil, nil
+	}}
+	ma := New(f, defaults())
+	r := player.NewRouter(defaults(), ma, sonos.New(f, nil), ma)
+	name, err := r.Play(context.Background(), player.Request{Query: &player.Query{Artist: "Disturbed", Album: "Divisive"}, Area: office, Volume: 15}, "")
+	if err != nil || name != "sonos" {
+		t.Fatalf("Play = %q, %v", name, err)
+	}
+	var services []string
+	for _, c := range f.Calls {
+		services = append(services, c.Domain+"."+c.Service)
+	}
+	want := []string{"music_assistant.search", "media_player.media_stop", "media_player.volume_set", "media_player.repeat_set", "media_player.shuffle_set", "media_player.play_media"}
+	if !reflect.DeepEqual(services, want) {
+		t.Fatalf("services = %v", services)
+	}
+	if got := f.Calls[5].Data["media_content_id"]; got != "https://music.apple.com/us/album/album-1646032515/1646032515" {
+		t.Errorf("media_content_id = %v", got)
+	}
+}

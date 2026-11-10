@@ -380,6 +380,13 @@ type Searcher interface{ Search(ctx context.Context, area rooms.Area, q Query) (
 var ErrNoPlayer error
 ```
 
+Router rules: the override player is tried first, then the rest of the
+default chain (with fallback on). A search error stops the chain; search
+not-found is recorded as `no_match`. MA call order is `volume_set` →
+`play_media` → `shuffle_set` → `repeat_set`, so music never starts at the old
+volume. `apple_music://track/<id>` maps to
+`https://music.apple.com/us/song/track/<id>`.
+
 Phase 0 amendments (authoritative, the code is the source of truth):
 `labels.Job.Offset` is `model.Offset`. `model.NormalizeName` is the one name
 key used by scan and registry. Missing `repeat` defaults to `all` and nil
