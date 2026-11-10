@@ -7,5 +7,5 @@ import "embed"
 
 // FS holds the UI files. Use relative URLs only (Ingress).
 //
-//go:embed index.html
+//go:embed index.html *.css *.js
 var FS embed.FS

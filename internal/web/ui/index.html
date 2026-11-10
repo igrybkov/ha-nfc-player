@@ -2,10 +2,26 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!--BASE-->
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>NFC Player</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
 </head>
 <body>
-<p>NFC Player UI placeholder (track C).</p>
+<header class="top">
+  <nav id="nav" aria-label="Screens">
+    <a href="#/tags" data-screen="tags">Tags</a>
+    <a href="#/scans" data-screen="scans">Unknown scans</a>
+    <a href="#/print" data-screen="print">Print</a>
+    <a href="#/templates" data-screen="templates">Templates</a>
+    <a href="#/backgrounds" data-screen="backgrounds">Backgrounds</a>
+    <a href="#/settings" data-screen="settings">Settings</a>
+  </nav>
+</header>
+<main id="view"></main>
+<div id="toasts" aria-live="polite"></div>
 </body>
 </html>
