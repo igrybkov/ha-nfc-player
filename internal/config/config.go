@@ -26,7 +26,7 @@ type Config struct {
 	LogLevel   string // debug | info | warn | error
 	ConfigDir  string // tags/settings/templates/backgrounds YAML; default /homeassistant/nfc_player
 	DataDir    string // cache and options.json; default /data
-	Listen     string // default :8099
+	Listen     string // default :8099 under Supervisor, else 127.0.0.1:8099
 	HAURL      string // websocket URL
 	HAToken    string
 	Supervisor bool // running under Supervisor (SUPERVISOR_TOKEN set)
@@ -46,7 +46,12 @@ func (c Config) Path(name string) string { return filepath.Join(c.ConfigDir, nam
 const (
 	defaultDataDir   = "/data"
 	defaultConfigDir = "/homeassistant/nfc_player"
-	DefaultListen    = ":8099" // LISTEN default; the healthcheck reads it too
+	// DefaultListen is the LISTEN default under Supervisor, where Ingress
+	// reaches the app over the hassio network. The healthcheck reads its port.
+	DefaultListen = ":8099"
+	// DefaultDevListen is the LISTEN default outside Supervisor: loopback
+	// only, since the UI has no login of its own.
+	DefaultDevListen = "127.0.0.1:8099"
 )
 
 // options is /data/options.json, written by Supervisor from the app options.
@@ -57,6 +62,7 @@ type options struct {
 
 // Load reads env (HA_URL, HA_TOKEN, DATA_DIR, CONFIG_DIR, LISTEN, LOG_LEVEL,
 // SUPERVISOR_TOKEN) and <DataDir>/options.json (log_level, config_dir).
+// LISTEN defaults to DefaultListen under Supervisor, else DefaultDevListen.
 //
 // Precedence: env, then options.json, then defaults. Env wins so a dev run can
 // point at local dirs while reusing a copied options.json.
@@ -70,7 +76,6 @@ func Load() (Config, error) { return load(os.Getenv, os.ReadFile) }
 func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Config, error) {
 	c := Config{
 		DataDir: firstNonEmpty(getenv("DATA_DIR"), defaultDataDir),
-		Listen:  firstNonEmpty(getenv("LISTEN"), DefaultListen),
 	}
 
 	var opts options
@@ -94,10 +99,12 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 
 	if tok := getenv("SUPERVISOR_TOKEN"); tok != "" {
 		c.Supervisor = true
+		c.Listen = firstNonEmpty(getenv("LISTEN"), DefaultListen)
 		c.HAURL = ha.SupervisorURL
 		c.HAToken = tok
 		return c, nil
 	}
+	c.Listen = firstNonEmpty(getenv("LISTEN"), DefaultDevListen)
 
 	c.HAToken = getenv("HA_TOKEN")
 	if getenv("HA_URL") == "" || c.HAToken == "" {

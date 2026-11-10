@@ -31,6 +31,8 @@ type fakeHA struct {
 	subs       map[*websocket.Conn]map[string]int // conn → event type → subscription id
 	lists      map[string]int                     // registry list type → times served
 	serviceErr *Error
+	accepted   int            // connections that passed auth
+	subFail    map[string]int // event type → subscribe_events left to refuse
 }
 
 func newFakeHA(t *testing.T) *fakeHA {
@@ -69,6 +71,7 @@ func (f *fakeHA) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.conns = append(f.conns, ws)
 	f.subs[ws] = map[string]int{}
+	f.accepted++
 	f.mu.Unlock()
 
 	lastID := 0
@@ -98,9 +101,19 @@ func (f *fakeHA) handle(w http.ResponseWriter, r *http.Request) {
 		case "ping":
 			write(map[string]any{"id": id, "type": "pong"})
 		case "subscribe_events":
+			typ := cmd["event_type"].(string)
 			f.mu.Lock()
-			f.subs[ws][cmd["event_type"].(string)] = id
+			refuse := f.subFail[typ] > 0
+			if refuse {
+				f.subFail[typ]--
+			} else {
+				f.subs[ws][typ] = id
+			}
 			f.mu.Unlock()
+			if refuse {
+				write(map[string]any{"id": id, "type": "result", "success": false, "error": map[string]any{"code": "unauthorized", "message": "Unauthorized"}})
+				continue
+			}
 			ok(nil)
 		case "unsubscribe_events":
 			ok(nil)
@@ -354,6 +367,33 @@ func TestEventsAndReconnect(t *testing.T) {
 	// Requests work on the new connection.
 	if _, err := c.Areas(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestResubscribeFailureReconnects(t *testing.T) {
+	f := newFakeHA(t)
+	c, _, _ := startClient(t, f, testToken)
+	ctx := testCtx(t)
+	got := make(chan Event, 10)
+	if err := c.SubscribeEvents(ctx, "tag_scanned", func(ev Event) { got <- ev }); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "subscription", func() bool { return f.emit("tag_scanned", map[string]any{"tag_id": "a"}) == 1 })
+
+	// HA refuses the resubscribe on the next connection only. The client
+	// must drop that connection and subscribe again on a new one.
+	f.mu.Lock()
+	f.subFail = map[string]int{"tag_scanned": 1}
+	f.mu.Unlock()
+	f.dropAll()
+	waitFor(t, "subscription on a third connection", func() bool {
+		return f.emit("tag_scanned", map[string]any{"tag_id": "b"}) == 1
+	})
+	f.mu.Lock()
+	accepted, left := f.accepted, f.subFail["tag_scanned"]
+	f.mu.Unlock()
+	if left != 0 || accepted != 3 {
+		t.Errorf("connections = %d, refusals left = %d; want 3 and 0", accepted, left)
 	}
 }
 

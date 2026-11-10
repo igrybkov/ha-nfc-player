@@ -107,6 +107,12 @@ func (t Template) PerSheet() int { return t.Grid.Cols * t.Grid.Rows }
 // fitTolerance absorbs float error when a grid exactly fills the page.
 const fitTolerance = 1e-9
 
+// Caps that keep one template from making a huge PDF or slot map.
+const (
+	MaxSlots  = 1000 // cols*rows
+	MaxSizeIn = 50.0 // page and label width and height
+)
+
 // Validate checks sizes, that the grid fits the page and that the layout is
 // registered. Uniqueness of ids is checked by ValidateTemplates.
 func (t Template) Validate() error {
@@ -132,6 +138,15 @@ func (t Template) Validate() error {
 		if !(p.v > 0) { // also catches NaN
 			add("%s must be > 0", p.name)
 		}
+	}
+	for _, p := range positive[:4] { // page and label sizes
+		if p.v > MaxSizeIn {
+			add("%s must be <= %g", p.name, MaxSizeIn)
+		}
+	}
+	// Each side alone first, so the product can't overflow.
+	if t.Grid.Cols > MaxSlots || t.Grid.Rows > MaxSlots || t.Grid.Cols*t.Grid.Rows > MaxSlots {
+		add("grid.cols*grid.rows must be <= %d", MaxSlots)
 	}
 	nonNegative := []struct {
 		name string

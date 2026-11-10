@@ -29,7 +29,9 @@ them.
 
 Coming from the old "Play Music when NFC tag is scanned" automation? Copy
 `examples/tags.yaml` and `examples/settings.yaml` from the repository into
-`config_dir`. They hold the old Music Map and room volumes.
+`config_dir`. They hold the old Music Map and room volumes. You can copy them
+before or after the first start: the app writes nothing to `config_dir` until
+you save something, and it picks up a new file on its next read.
 
 ## Options
 
@@ -47,10 +49,15 @@ The app keeps your data as plain YAML under `config_dir`:
 - `templates.yaml`: your own label templates.
 - `backgrounds.yaml`: your own label backgrounds.
 
-You can edit these files by hand or with git. The app reloads a file when it
-changes on disk.
+A file that does not exist reads as the defaults. The app creates it the
+first time you save on that screen, so an untouched `config_dir` stays empty
+and git sees no new files. You can edit these files by hand or with git. The
+app reloads a file when it changes on disk.
 
 Downloaded cover art is cached in the app's `/data` folder.
+
+The UI opens only through Home Assistant (Ingress). Its pages set a strict
+Content-Security-Policy and can only be framed by Home Assistant itself.
 
 ## Screens
 
@@ -70,6 +77,14 @@ Downloaded cover art is cached in the app's `/data` folder.
 On **Print**, pick tags, copies, a template and a background. Click a slot
 on the sheet to start there; used slots stay empty. **Generate PDF** opens
 the PDF; print it at 100% (no scaling).
+
+If a picked tag has no cover art, a warning under the sheet names it before
+you print. Those labels print without art. Open the tag to set an artwork
+URL or file, or press **Refresh art** to look it up again.
+
+Art lookups only go to Apple (Apple Music pages, the iTunes API and its
+image servers). An artwork URL you set yourself may point at any public
+site, but never at an address on your local network.
 
 If your printer shifts the page, set the offset in mm and press **Save
 offsets**. It is saved per template. Positive X moves the print right,

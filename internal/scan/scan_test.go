@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -102,13 +103,22 @@ type harness struct {
 }
 
 func start(t *testing.T, f *hatest.Fake) *harness {
+	return startWith(t, f, f, nil)
+}
+
+// startWith lets a test wrap the HA client the rooms resolver uses and
+// change the Handler before Run starts.
+func startWith(t *testing.T, f *hatest.Fake, roomsHA ha.Client, setup func(*Handler)) *harness {
 	t.Helper()
 	s := &settings{model.DefaultSettings()}
-	rs := rooms.New(f, s)
+	rs := rooms.New(roomsHA, s)
 	ma := musicassistant.New(f, s)
 	router := player.NewRouter(s, ma, sonos.New(f, nil), ma)
 	ring := NewRing(LogSize)
 	h := New(Deps{HA: f, Entries: testEntries, Settings: s, Rooms: rs, Router: router, Log: ring, Logger: slog.New(slog.DiscardHandler)})
+	if setup != nil {
+		setup(h)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- h.Run(ctx) }()
@@ -124,11 +134,20 @@ func (hs *harness) stop() {
 }
 
 func (hs *harness) scan(tagID, name, device string) {
+	hs.scanAt(tagID, name, device, time.Time{})
+}
+
+// scanAt emits a scan with the given TimeFired (zero = not set).
+func (hs *harness) scanAt(tagID, name, device string, fired time.Time) {
 	data := map[string]any{"tag_id": tagID, "device_id": device}
 	if name != "" {
 		data["name"] = name
 	}
-	hs.f.EmitData(EventType, data)
+	raw, err := json.Marshal(data)
+	if err != nil {
+		panic(err)
+	}
+	hs.f.Emit(ha.Event{EventType: EventType, Data: raw, TimeFired: fired})
 }
 
 // waitScans waits until n scans are recorded and returns them oldest first.
@@ -504,5 +523,59 @@ func TestRingConcurrent(t *testing.T) {
 	wg.Wait()
 	if n := len(r.Recent()); n != LogSize {
 		t.Errorf("len = %d", n)
+	}
+}
+
+func TestScanAge(t *testing.T) {
+	now := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		fired time.Time
+		want  model.ScanResult
+	}{
+		{"stale", now.Add(-MaxScanAge - time.Second), model.ScanIgnored},
+		{"fresh", now.Add(-5 * time.Second), model.ScanPlayed},
+		{"at the limit", now.Add(-MaxScanAge), model.ScanPlayed},
+		{"clock skew", now.Add(time.Minute), model.ScanPlayed},
+		{"no TimeFired", time.Time{}, model.ScanPlayed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := fakeHA()
+			hs := startWith(t, f, f, func(h *Handler) { h.now = func() time.Time { return now } })
+			hs.scanAt("", "Metallica — Essential", "reader-fr", tc.fired)
+			s := hs.waitScans(t, 1)[0]
+			if s.Result != tc.want {
+				t.Fatalf("result = %s, want %s (%+v)", s.Result, tc.want, s)
+			}
+			played := len(playMedia(hs.f.ServiceCalls())) > 0
+			if played != (tc.want == model.ScanPlayed) {
+				t.Errorf("played = %v for result %s", played, s.Result)
+			}
+			if tc.want == model.ScanIgnored && !strings.Contains(s.Error, "old") {
+				t.Errorf("ignored scan has no reason: %q", s.Error)
+			}
+		})
+	}
+}
+
+// stallingHA never answers the device registry until ctx is done.
+type stallingHA struct{ *hatest.Fake }
+
+func (stallingHA) Devices(ctx context.Context) ([]ha.Device, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestScanAreaLookupTimeout(t *testing.T) {
+	f := fakeHA()
+	hs := startWith(t, f, stallingHA{f}, func(h *Handler) { h.areaTimeout = 20 * time.Millisecond })
+	hs.scan("", "Metallica — Essential", "reader-fr")
+	hs.scan("", "Metallica — Essential", "reader-office")
+	scans := hs.waitScans(t, 2) // the second one is not stuck behind the first
+	for _, s := range scans {
+		if s.Result != model.ScanError || !strings.Contains(s.Error, "deadline") {
+			t.Errorf("scan = %+v, want an area lookup timeout", s)
+		}
 	}
 }

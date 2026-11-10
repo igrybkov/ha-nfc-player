@@ -64,6 +64,7 @@ type fakeArt struct {
 	fail     map[string]bool // entry id → error
 	calls    []string
 	refreshs int
+	shade    uint8 // pixel value; 0 = 200
 }
 
 func (f *fakeArt) Artwork(_ context.Context, e model.Entry, refresh bool) (image.Image, error) {
@@ -76,9 +77,13 @@ func (f *fakeArt) Artwork(_ context.Context, e model.Entry, refresh bool) (image
 	if f.fail[e.ID] {
 		return nil, errors.New("no art")
 	}
+	shade := f.shade
+	if shade == 0 {
+		shade = 200
+	}
 	img := image.NewRGBA(image.Rect(0, 0, 100, 100))
 	for i := range img.Pix {
-		img.Pix[i] = 200
+		img.Pix[i] = shade
 	}
 	img.Set(0, 0, color.RGBA{255, 0, 0, 255})
 	return img, nil
@@ -290,9 +295,9 @@ func TestTagsCRUD(t *testing.T) {
 		t.Fatalf("created %+v", created)
 	}
 
-	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "metallica — essential", "url": "u"}), http.StatusConflict)
+	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "metallica — essential", "url": "apple_music://album/1"}), http.StatusConflict)
 	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "X"}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "X", "url": "u", "volum": 3}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "X", "url": "apple_music://album/1", "volum": 3}), http.StatusBadRequest)
 	wantJSONError(t, e.do(t, "POST", "/api/tags", "{not json"), http.StatusBadRequest)
 
 	w = e.do(t, "GET", "/api/tags", nil)
@@ -308,7 +313,7 @@ func TestTagsCRUD(t *testing.T) {
 	if got := decode[model.Entry](t, w); got.Volume == nil || *got.Volume != 30 {
 		t.Fatalf("updated %+v", got)
 	}
-	wantJSONError(t, e.do(t, "PUT", "/api/tags/metallica-essential", map[string]any{"id": "other", "name": "X", "url": "u"}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "PUT", "/api/tags/metallica-essential", map[string]any{"id": "other", "name": "X", "url": "apple_music://album/1"}), http.StatusBadRequest)
 	created.ID = ""
 	wantJSONError(t, e.do(t, "PUT", "/api/tags/missing", created), http.StatusNotFound)
 
@@ -326,13 +331,13 @@ func TestEmptyListIsArray(t *testing.T) {
 
 func TestBodyTooLarge(t *testing.T) {
 	e := newEnv(t, false)
-	big := `{"name":"` + strings.Repeat("a", maxBodyBytes+10) + `","url":"u"}`
+	big := `{"name":"` + strings.Repeat("a", maxBodyBytes+10) + `","url":"apple_music://album/1"}`
 	wantJSONError(t, e.do(t, "POST", "/api/tags", big), http.StatusRequestEntityTooLarge)
 }
 
 func TestPlay(t *testing.T) {
 	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "A — B", URL: "u"})
+	en := e.mustCreate(t, model.Entry{Name: "A — B", URL: "apple_music://album/1"})
 
 	wantJSONError(t, e.do(t, "POST", "/api/tags/"+en.ID+"/play", map[string]string{}), http.StatusBadRequest)
 	wantJSONError(t, e.do(t, "POST", "/api/tags/nope/play", map[string]string{"area_id": "office"}), http.StatusNotFound)
@@ -352,26 +357,44 @@ func TestPlay(t *testing.T) {
 
 func TestPanicBecomes500(t *testing.T) {
 	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "A", URL: "u"})
+	en := e.mustCreate(t, model.Entry{Name: "A", URL: "apple_music://album/1"})
 	e.play.panic = true
 	wantJSONError(t, e.do(t, "POST", "/api/tags/"+en.ID+"/play", map[string]string{"area_id": "office"}), http.StatusInternalServerError)
 }
 
 func TestArtwork(t *testing.T) {
 	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "A", URL: "u"})
+	en := e.mustCreate(t, model.Entry{Name: "A", URL: "apple_music://album/1"})
 
 	w := e.do(t, "GET", "/api/tags/"+en.ID+"/artwork", nil)
 	wantStatus(t, w, http.StatusOK)
 	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
 		t.Fatalf("content type %q", ct)
 	}
-	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+	// The art behind a URL can change (Refresh art), so browsers revalidate.
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-cache") || strings.Contains(cc, "max-age") {
 		t.Fatalf("cache-control %q", cc)
+	}
+	etag := w.Header().Get("ETag")
+	if len(etag) < 10 || etag[0] != '"' {
+		t.Fatalf("etag %q", etag)
 	}
 	img, err := jpeg.Decode(w.Body)
 	if err != nil || img.Bounds().Dx() != 100 {
 		t.Fatalf("decode: %v %v", err, img)
+	}
+	w = e.do(t, "GET", "/api/tags/"+en.ID+"/artwork", nil, header("If-None-Match", etag))
+	if w.Code != http.StatusNotModified || w.Body.Len() != 0 {
+		t.Fatalf("revalidation: status %d, %d bytes; want 304", w.Code, w.Body.Len())
+	}
+	// New art behind the same URL: a new ETag, and the old one no longer matches.
+	e.art.mu.Lock()
+	e.art.shade = 90
+	e.art.mu.Unlock()
+	w = e.do(t, "GET", "/api/tags/"+en.ID+"/artwork", nil, header("If-None-Match", etag))
+	wantStatus(t, w, http.StatusOK)
+	if w.Header().Get("ETag") == etag {
+		t.Fatal("ETag did not change with the art")
 	}
 
 	w = e.do(t, "GET", "/api/tags/"+en.ID+"/artwork?size=32&refresh=1", nil)
@@ -395,8 +418,8 @@ func TestArtwork(t *testing.T) {
 
 func TestHATags(t *testing.T) {
 	e := newEnv(t, false)
-	byID := e.mustCreate(t, model.Entry{Name: "Linked", URL: "u", TagIDs: []string{"t1"}})
-	byName := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "u"})
+	byID := e.mustCreate(t, model.Entry{Name: "Linked", URL: "apple_music://album/1", TagIDs: []string{"t1"}})
+	byName := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1"})
 	now := time.Now().UTC().Truncate(time.Second)
 	e.tags.tags = []ha.Tag{
 		{ID: "t1", Name: "whatever"},
@@ -432,7 +455,7 @@ func TestScans(t *testing.T) {
 	e := newEnv(t, false)
 	e.scans.Add(model.Scan{TagID: "x", TagName: "New Album", Result: model.ScanNoMatch})
 	e.scans.Add(model.Scan{TagID: "y", TagName: "Old", Result: model.ScanNoMatch})
-	en := e.mustCreate(t, model.Entry{Name: "Old", URL: "u"})
+	en := e.mustCreate(t, model.Entry{Name: "Old", URL: "apple_music://album/1"})
 
 	w := e.do(t, "GET", "/api/scans", nil)
 	wantStatus(t, w, http.StatusOK)
@@ -552,8 +575,8 @@ func TestLayouts(t *testing.T) {
 
 func TestPrintPreview(t *testing.T) {
 	e := newEnv(t, false)
-	a := e.mustCreate(t, model.Entry{Name: "A — B", URL: "u"})
-	b := e.mustCreate(t, model.Entry{Name: "C", URL: "u"})
+	a := e.mustCreate(t, model.Entry{Name: "A — B", URL: "apple_music://album/1"})
+	b := e.mustCreate(t, model.Entry{Name: "C", URL: "apple_music://album/1"})
 
 	w := e.do(t, "POST", "/api/print/preview", printRequest{
 		EntryIDs: []string{a.ID, b.ID}, TemplateID: "avery-5434", Copies: 2, StartRow: 2, StartCol: 2,
@@ -570,9 +593,26 @@ func TestPrintPreview(t *testing.T) {
 	if job.Background.ID != "white" || job.InsetMM != 1.5 || job.BleedMM != 1.5 || job.EdgeBleedMM != 0.4 {
 		t.Fatalf("job %+v", job)
 	}
-	if len(e.art.calls) != 0 {
-		t.Fatal("preview must not fetch art")
+	if len(got.MissingArt) != 0 {
+		t.Fatalf("missing art %+v, want none", got.MissingArt)
 	}
+
+	// Entries without art are listed, so the UI can warn before printing.
+	e.art.fail[b.ID] = true
+	w = e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{a.ID, b.ID}, TemplateID: "avery-5434"})
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[previewResponse](t, w); len(got.MissingArt) != 1 || got.MissingArt[0].ID != b.ID || got.MissingArt[0].Name != "C" {
+		t.Fatalf("missing art %+v", got.MissingArt)
+	}
+	// An outline preview prints no art, so it looks none up.
+	calls := len(e.art.calls)
+	w = e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{b.ID}, TemplateID: "avery-5434", Outline: true})
+	if got := decode[previewResponse](t, w); got.MissingArt == nil || len(got.MissingArt) != 0 || len(e.art.calls) != calls {
+		t.Fatalf("outline preview: missing %v, art calls %d → %d", got.MissingArt, calls, len(e.art.calls))
+	}
+	// The template editor's outline preview fills a whole sheet of the
+	// largest allowed grid.
+	wantStatus(t, e.do(t, "POST", "/api/print/preview", printRequest{Sample: maxSample, TemplateID: "avery-5434", Outline: true}), http.StatusOK)
 
 	// Saved offset is used when the request has none.
 	e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{a.ID}, TemplateID: "avery-5260"})
@@ -608,8 +648,8 @@ func TestPrintPreview(t *testing.T) {
 func TestPrintPDF(t *testing.T) {
 	e := newEnv(t, false)
 	title := "Custom title"
-	a := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "u", Label: model.LabelOverrides{Title: &title}})
-	b := e.mustCreate(t, model.Entry{Name: "No Art", URL: "u"})
+	a := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1", Label: model.LabelOverrides{Title: &title}})
+	b := e.mustCreate(t, model.Entry{Name: "No Art", URL: "apple_music://album/1"})
 	e.art.fail[b.ID] = true
 
 	w := e.do(t, "POST", "/api/print/pdf", printRequest{EntryIDs: []string{a.ID, b.ID}, TemplateID: "avery-5260", BackgroundID: "black"})
@@ -632,6 +672,9 @@ func TestPrintPDF(t *testing.T) {
 	}
 	if job.Items[1].Title != "No Art" || job.Items[1].Art != nil {
 		t.Fatalf("item 1 %+v", job.Items[1])
+	}
+	if got := w.Header().Get("X-Missing-Art"); got != "1" {
+		t.Fatalf("X-Missing-Art = %q, want 1", got)
 	}
 }
 
@@ -679,6 +722,12 @@ func TestUI(t *testing.T) {
 	if w.Header().Get("Cache-Control") != "no-cache" {
 		t.Fatalf("cache-control %q", w.Header().Get("Cache-Control"))
 	}
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "frame-ancestors 'self'") {
+		t.Fatalf("csp %q", csp)
+	}
+	if csp := e.do(t, "GET", "/app.js", nil).Header().Get("Content-Security-Policy"); csp == "" {
+		t.Fatal("assets have no CSP")
+	}
 
 	w = e.do(t, "GET", "/", nil, header("X-Ingress-Path", "/api/hassio_ingress/abc123"))
 	if !strings.Contains(w.Body.String(), `<base href="/api/hassio_ingress/abc123/">`) {
@@ -687,6 +736,24 @@ func TestUI(t *testing.T) {
 	w = e.do(t, "GET", "/", nil, header("X-Ingress-Path", `/x"><script>alert(1)</script>`))
 	if strings.Contains(w.Body.String(), "<script>alert") || !strings.Contains(w.Body.String(), `<base href="./">`) {
 		t.Fatal("unsafe ingress path must be ignored")
+	}
+	for p, want := range map[string]string{
+		"/api/hassio_ingress/abc-12_3.x/": "/api/hassio_ingress/abc-12_3.x/",
+		"/a":                              "/a/",
+		"//evil.example/x":                "./",
+		"/a//b":                           "./",
+		"/a/../b":                         "./",
+		"/..":                             "./",
+		"/a/./b":                          "./",
+		"/":                               "./",
+		"a/b":                             "./",
+		"/a b":                            "./",
+		"/a/b?c":                          "./",
+	} {
+		w := e.do(t, "GET", "/", nil, header("X-Ingress-Path", p))
+		if !strings.Contains(w.Body.String(), `<base href="`+want+`">`) {
+			t.Errorf("X-Ingress-Path %q: want base %q", p, want)
+		}
 	}
 
 	for _, f := range []string{"app.js", "lib.js", "fuzzy.js", "tags.js", "scans.js", "print.js", "templates.js", "backgrounds.js", "settings.js"} {

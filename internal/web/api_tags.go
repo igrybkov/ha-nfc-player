@@ -1,12 +1,16 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"image"
 	"image/jpeg"
 	"net/http"
 	"strconv"
+	"time"
 
 	"golang.org/x/image/draw"
 
@@ -94,8 +98,13 @@ const (
 )
 
 // tagArtwork serves the entry art as JPEG. ?size=N scales it to N×N for list
-// thumbnails; ?refresh=1 skips the art cache. The UI adds a version query
-// built from the entry URL and art override, so a long max-age is safe.
+// thumbnails; ?refresh=1 skips the art cache.
+//
+// The art behind one URL changes when "Refresh art" finds a new image, so
+// the response carries an ETag (a hash of the JPEG) with no-cache: browsers
+// revalidate and get a 304 while the art is the same. Computing the ETag
+// costs a decode from the disk cache plus an encode, which is fine for the
+// few dozen thumbnails a screen shows.
 func (s *Server) tagArtwork(w http.ResponseWriter, r *http.Request) {
 	e, err := s.deps.Registry.Get(r.PathValue("id"))
 	if err != nil {
@@ -124,15 +133,21 @@ func (s *Server) tagArtwork(w http.ResponseWriter, r *http.Request) {
 	if size > 0 {
 		img = scale(img, size)
 	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+		s.writeErr(w, r, fmt.Errorf("encode artwork: %w", err))
+		return
+	}
+	sum := sha256.Sum256(buf.Bytes())
 	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
 	if refresh {
 		w.Header().Set("Cache-Control", "no-store")
 	} else {
-		w.Header().Set("Cache-Control", "private, max-age=604800")
+		w.Header().Set("Cache-Control", "private, no-cache")
 	}
-	if err := jpeg.Encode(w, img, &jpeg.Options{Quality: 85}); err != nil {
-		s.log.Debug("web: write artwork", "entry", e.ID, "err", err)
-	}
+	// ServeContent answers If-None-Match with a 304.
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(buf.Bytes()))
 }
 
 // scale fits img into a size×size square (art is already square).

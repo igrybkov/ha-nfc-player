@@ -125,7 +125,8 @@ The app runs under Supervisor with:
 - Persistent data at `/data`.
 
 Dev mode (outside Supervisor): env `HA_URL` (e.g. `https://hass.example`) and
-`HA_TOKEN`, `DATA_DIR`, `CONFIG_DIR`, `LISTEN` (default `:8099`).
+`HA_TOKEN`, `DATA_DIR`, `CONFIG_DIR`, `LISTEN` (default `127.0.0.1:8099`
+outside Supervisor, `:8099` under it).
 
 Files:
 

@@ -72,6 +72,27 @@ func TestLoadDevMode(t *testing.T) {
 	}
 }
 
+func TestLoadListenDefaults(t *testing.T) {
+	dev, err := load(env(map[string]string{"HA_URL": "https://hass.example", "HA_TOKEN": "t"}), files(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev.Listen != "127.0.0.1:8099" {
+		t.Errorf("outside Supervisor: Listen = %q, want loopback only", dev.Listen)
+	}
+	sup, err := load(env(map[string]string{"SUPERVISOR_TOKEN": "tok"}), files(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sup.Listen != ":8099" {
+		t.Errorf("under Supervisor: Listen = %q, want :8099", sup.Listen)
+	}
+	sup, err = load(env(map[string]string{"SUPERVISOR_TOKEN": "tok", "LISTEN": ":9000"}), files(nil))
+	if err != nil || sup.Listen != ":9000" {
+		t.Errorf("LISTEN env under Supervisor: %q, %v", sup.Listen, err)
+	}
+}
+
 func TestLoadErrors(t *testing.T) {
 	cases := map[string]struct {
 		env   map[string]string
@@ -103,8 +124,9 @@ func TestSettingsDefaultWhenMissing(t *testing.T) {
 	if got.Rooms.DefaultVolume != 15 || got.Print.Offsets["avery-5260"].YMM != -0.75 {
 		t.Fatalf("got %+v", got)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("settings.yaml not created: %v", err)
+	// Reading must not create the file: HA's git repo would commit it.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("settings.yaml written on read (stat err %v)", err)
 	}
 }
 

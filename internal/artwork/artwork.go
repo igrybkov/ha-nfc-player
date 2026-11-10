@@ -13,9 +13,20 @@
 //  4. iTunes album search by name.
 //
 // Each step that fails is logged and the next one runs. A key whose chain
-// found nothing is remembered in memory for NegativeTTL, and concurrent
-// lookups for one key share a single run. An index URL that now returns 404
-// or 410 is dropped and the chain runs once more.
+// ran cleanly and found nothing is remembered in memory for NegativeTTL. If a
+// step failed with a transient error (network, timeout, 5xx), the chain
+// returns that error instead and nothing is remembered. Concurrent lookups
+// for one key share a single run. An index URL that now returns 404 or 410 is
+// dropped and the chain runs once more.
+//
+// # Network guard
+//
+// The chain (pages, iTunes, the art it finds, index URLs) only fetches from
+// hosts AllowHost accepts, checked before each request and on each redirect.
+// A label.artwork URL may point at any host, but every connection, chain or
+// override, is refused when the resolved IP is loopback, private, link-local,
+// CGNAT, unspecified or multicast. The check runs on the dialed IP, so DNS
+// rebinding does not get around it.
 package artwork
 
 import (
@@ -34,13 +45,16 @@ import (
 	_ "image/png"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "golang.org/x/image/webp" // override files are sometimes webp
@@ -48,8 +62,15 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 )
 
-// ErrNotFound means no step of the chain found art for the entry.
+// ErrNotFound means every step of the chain ran and none found art.
 var ErrNotFound = errors.New("artwork: not found")
+
+// ErrBlocked means a request was refused by the network guard: a host the
+// chain may not use, or an address that is not public.
+var ErrBlocked = errors.New("artwork: address not allowed")
+
+// ErrTooLarge means an image has more than MaxPixels pixels.
+var ErrTooLarge = errors.New("artwork: image too large")
 
 // Defaults for the zero-value fields of Cache.
 const (
@@ -60,6 +81,11 @@ const (
 	maxPageBytes  = 5 << 20
 	maxJSONBytes  = 2 << 20
 	maxImageBytes = 20 << 20
+	maxRedirects  = 10
+
+	// MaxPixels caps width*height of any image before it is decoded, so a
+	// small file that claims a huge size can't exhaust memory.
+	MaxPixels = 50_000_000
 
 	// NegativeTTL is how long a key whose chain found nothing is not looked
 	// up again. Refresh skips it.
@@ -80,6 +106,16 @@ type Cache struct {
 	ITunesURL string // default DefaultITunesURL; tests point it at httptest
 	UserAgent string // default DefaultUserAgent; Apple pages want a browser-like one
 	Logger    *slog.Logger
+	// AllowHost reports whether the lookup chain may fetch from host (lower
+	// case, no port). nil = DefaultAllowHost. Override URLs skip it.
+	AllowHost func(host string) bool
+
+	// allowPrivate turns off the dial-time IP check; tests set it to reach
+	// httptest on 127.0.0.1.
+	allowPrivate bool
+
+	clientOnce              sync.Once
+	chainHTTP, overrideHTTP *http.Client
 
 	mu sync.Mutex // serializes artwork.json read-modify-write
 
@@ -108,7 +144,7 @@ func (c *Cache) Artwork(ctx context.Context, e model.Entry, refresh bool) (image
 	case override != "" && !isHTTP(override):
 		img, err = c.loadFile(override)
 	case override != "":
-		img, err = c.loadURL(ctx, override, refresh)
+		img, err = c.loadURL(ctx, override, refresh, false)
 	default:
 		img, err = c.resolveAndLoad(ctx, e, refresh)
 	}
@@ -120,7 +156,9 @@ func (c *Cache) Artwork(ctx context.Context, e model.Entry, refresh bool) (image
 
 // ResolveURL finds the art URL for e (override, iTunes lookup, og:image,
 // search). It does not use or update the index. A path override is returned
-// as given.
+// as given. It returns ErrNotFound only when every step ran cleanly; if a
+// step hit a transient error and no later step found art, that error is
+// returned instead.
 func (c *Cache) ResolveURL(ctx context.Context, e model.Entry) (string, error) {
 	if override := overrideOf(e); override != "" {
 		return override, nil
@@ -132,6 +170,7 @@ func (c *Cache) ResolveURL(ctx context.Context, e model.Entry) (string, error) {
 			func() (string, error) { return c.pageArtwork(ctx, e.URL) })
 	}
 	steps = append(steps, func() (string, error) { return c.searchArtwork(ctx, e.Name) })
+	var transient error
 	for _, step := range steps {
 		found, err := step()
 		if err != nil {
@@ -139,11 +178,17 @@ func (c *Cache) ResolveURL(ctx context.Context, e model.Entry) (string, error) {
 				return "", ctx.Err()
 			}
 			c.logger().Warn("artwork lookup failed", "name", e.Name, "error", err)
+			if transient == nil && isTransient(err) {
+				transient = err
+			}
 			continue
 		}
 		if found != "" {
 			return found, nil
 		}
+	}
+	if transient != nil {
+		return "", fmt.Errorf("artwork lookup incomplete: %w", transient)
 	}
 	return "", ErrNotFound
 }
@@ -165,7 +210,7 @@ func (c *Cache) resolveAndLoad(ctx context.Context, e model.Entry, refresh bool)
 			return nil, err
 		}
 	}
-	img, err := c.loadURL(ctx, source, refresh)
+	img, err := c.loadURL(ctx, source, refresh, true)
 	if err == nil || !fromIndex || !isGone(err) {
 		return img, err
 	}
@@ -181,7 +226,7 @@ func (c *Cache) resolveAndLoad(ctx context.Context, e model.Entry, refresh bool)
 	if source, err = c.resolveKey(ctx, e, key, false); err != nil {
 		return nil, err
 	}
-	return c.loadURL(ctx, source, refresh)
+	return c.loadURL(ctx, source, refresh, true)
 }
 
 // resolveKey runs the lookup chain for an entry key and stores the result in
@@ -227,7 +272,7 @@ func (c *Cache) resolveKey(ctx context.Context, e model.Entry, key string, refre
 }
 
 // resolveAndRecord runs the chain, saves a hit in the index and remembers a
-// miss in memory. Context errors are not misses.
+// clean miss in memory. Context and transient errors are not misses.
 func (c *Cache) resolveAndRecord(ctx context.Context, e model.Entry, key string) (string, error) {
 	source, err := c.ResolveURL(ctx, e)
 	c.flightMu.Lock()
@@ -314,7 +359,7 @@ func (c *Cache) pageArtwork(ctx context.Context, pageURL string) (string, error)
 	if !isHTTP(pageURL) {
 		return "", nil // apple_music:// URIs have no page
 	}
-	page, err := c.get(ctx, pageURL, maxPageBytes)
+	page, err := c.get(ctx, pageURL, maxPageBytes, true)
 	if err != nil {
 		return "", fmt.Errorf("page %s: %w", pageURL, err)
 	}
@@ -341,8 +386,9 @@ func (c *Cache) searchArtwork(ctx context.Context, name string) (string, error) 
 
 // Images.
 
-// loadURL returns the image at u, from Dir/art unless refresh is set.
-func (c *Cache) loadURL(ctx context.Context, u string, refresh bool) (image.Image, error) {
+// loadURL returns the image at u, from Dir/art unless refresh is set. chain
+// selects the chain policy (AllowHost) over the override one (any public host).
+func (c *Cache) loadURL(ctx context.Context, u string, refresh, chain bool) (image.Image, error) {
 	sum := sha256.Sum256([]byte(u))
 	path := filepath.Join(c.Dir, imageDir, hex.EncodeToString(sum[:])+".img")
 	if !refresh {
@@ -352,11 +398,11 @@ func (c *Cache) loadURL(ctx context.Context, u string, refresh bool) (image.Imag
 			c.logger().Warn("cached artwork unreadable; downloading again", "path", path, "error", err)
 		}
 	}
-	data, err := c.get(ctx, u, maxImageBytes)
+	data, err := c.get(ctx, u, maxImageBytes, chain)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", u, err)
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, err := decodeImage(data)
 	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", u, err)
 	}
@@ -384,7 +430,11 @@ func (c *Cache) loadFile(p string) (image.Image, error) {
 		return nil, fmt.Errorf("artwork path: %w", err)
 	}
 	defer f.Close()
-	img, _, err := image.Decode(io.LimitReader(f, maxImageBytes))
+	data, err := readLimited(f, maxImageBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", p, err)
+	}
+	img, err := decodeImage(data)
 	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", p, err)
 	}
@@ -397,7 +447,36 @@ func decodeFile(path string) (image.Image, error) {
 		return nil, err
 	}
 	defer f.Close()
-	img, _, err := image.Decode(f)
+	data, err := readLimited(f, maxImageBytes)
+	if err != nil {
+		return nil, err
+	}
+	return decodeImage(data)
+}
+
+// readLimited reads all of r, failing when it holds more than limit bytes.
+func readLimited(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("larger than %d bytes", limit)
+	}
+	return data, nil
+}
+
+// decodeImage reads the header first and refuses images over MaxPixels, so
+// a decompression bomb never gets its pixel buffer allocated.
+func decodeImage(data []byte) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
+		return nil, fmt.Errorf("%w: %dx%d", ErrTooLarge, cfg.Width, cfg.Height)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
 	return img, err
 }
 
@@ -485,13 +564,23 @@ func writeAtomic(path string, data []byte) error {
 
 // HTTP.
 
-func (c *Cache) get(ctx context.Context, u string, limit int64) ([]byte, error) {
+// get fetches u. chain applies AllowHost to u and to every redirect.
+func (c *Cache) get(ctx context.Context, u string, limit int64, chain bool) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
+	client := c.overrideClient()
+	if chain {
+		if err := c.checkHost(req.URL); err != nil {
+			return nil, err
+		}
+		client = c.chainClient()
+	} else if err := checkScheme(req.URL); err != nil {
+		return nil, err
+	}
 	req.Header.Set("User-Agent", c.userAgent())
-	resp, err := c.client().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -523,23 +612,131 @@ func isGone(err error) bool {
 	return errors.As(err, &h) && (h.StatusCode == http.StatusNotFound || h.StatusCode == http.StatusGone)
 }
 
+// isTransient reports whether a lookup error may go away on its own: a
+// network error, a timeout, a 5xx or a 429. A blocked address, another 4xx or
+// a body that does not parse is a clean answer. The guard check comes first,
+// since its errors arrive wrapped in *url.Error like network errors do.
+func isTransient(err error) bool {
+	if errors.Is(err, ErrBlocked) {
+		return false
+	}
+	var h *HTTPError
+	if errors.As(err, &h) {
+		return h.StatusCode >= 500 || h.StatusCode == http.StatusTooManyRequests
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var ne net.Error
+	var ue *url.Error
+	return errors.As(err, &ne) || errors.As(err, &ue)
+}
+
 // getJSON decodes a JSON body. iTunes sends it as text/javascript, so the
-// content type is not checked.
+// content type is not checked. It always uses the chain policy.
 func (c *Cache) getJSON(ctx context.Context, u string, v any) error {
-	data, err := c.get(ctx, u, maxJSONBytes)
+	data, err := c.get(ctx, u, maxJSONBytes, true)
 	if err != nil {
 		return err
 	}
 	return json.Unmarshal(data, v)
 }
 
-var defaultClient = &http.Client{Timeout: defaultTimeout}
+// DefaultAllowHost accepts the Apple hosts the chain needs: Apple Music
+// pages, the iTunes API and the mzstatic image CDN.
+func DefaultAllowHost(host string) bool {
+	return host == "music.apple.com" || host == "geo.music.apple.com" || host == "itunes.apple.com" || strings.HasSuffix(host, ".mzstatic.com")
+}
 
-func (c *Cache) client() *http.Client {
-	if c.HTTP != nil {
-		return c.HTTP
+func (c *Cache) checkHost(u *url.URL) error {
+	if err := checkScheme(u); err != nil {
+		return err
 	}
-	return defaultClient
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	allow := c.AllowHost
+	if allow == nil {
+		allow = DefaultAllowHost
+	}
+	if !allow(host) {
+		return fmt.Errorf("%w: host %q", ErrBlocked, host)
+	}
+	return nil
+}
+
+func checkScheme(u *url.URL) error {
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%w: scheme %q", ErrBlocked, u.Scheme)
+	}
+	return nil
+}
+
+func (c *Cache) chainClient() *http.Client    { c.initClients(); return c.chainHTTP }
+func (c *Cache) overrideClient() *http.Client { c.initClients(); return c.overrideHTTP }
+
+// initClients builds the two clients from HTTP (or a default one). Both use
+// a copy of its transport with the dial-time IP check and no proxy; a proxy
+// would make the check see the proxy's address. They differ in the redirect
+// policy. An HTTP whose Transport is not an *http.Transport gets a default
+// transport, since the guard needs to set the dialer.
+func (c *Cache) initClients() {
+	c.clientOnce.Do(func() {
+		base := http.Client{Timeout: defaultTimeout}
+		if c.HTTP != nil {
+			base = *c.HTTP
+		}
+		t, ok := base.Transport.(*http.Transport)
+		if !ok || t == nil {
+			t = http.DefaultTransport.(*http.Transport)
+		}
+		t = t.Clone()
+		t.Proxy = nil
+		dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+		if !c.allowPrivate {
+			dialer.Control = guardDial
+		}
+		t.DialContext = dialer.DialContext
+		base.Transport = t
+
+		chain, override := base, base
+		chain.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			return c.checkHost(req.URL)
+		}
+		override.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			return checkScheme(req.URL)
+		}
+		c.chainHTTP, c.overrideHTTP = &chain, &override
+	})
+}
+
+// cgnat is the carrier-grade NAT range (RFC 6598); IsPrivate does not cover it.
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// guardDial is a net.Dialer Control hook: it refuses any address that is not
+// a public unicast IP. It sees the IP after DNS, so rebinding can't dodge it.
+func guardDial(network, address string, _ syscall.RawConn) error {
+	ap, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrBlocked, address, err)
+	}
+	if !publicIP(ap.Addr()) {
+		return fmt.Errorf("%w: %s is not a public address", ErrBlocked, ap.Addr())
+	}
+	return nil
+}
+
+func publicIP(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsValid() &&
+		!ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() &&
+		!ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() &&
+		!ip.IsInterfaceLocalMulticast() && !ip.IsMulticast() &&
+		!cgnat.Contains(ip)
 }
 
 func (c *Cache) itunesURL() string {

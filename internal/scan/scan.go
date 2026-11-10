@@ -32,6 +32,13 @@ const (
 	// Queue sizes. A full queue drops the scan and records an error.
 	eventQueueSize = 64
 	areaQueueSize  = 8
+	// areaTimeout bounds the reader area lookup, so a stalled HA can't hold
+	// up the dispatcher and every room behind it.
+	areaTimeout = 10 * time.Second
+	// MaxScanAge is the oldest scan that still plays. An older one waited
+	// too long (behind a slow play, or replayed after a reconnect); music
+	// starting a minute after the tap would surprise more than help.
+	MaxScanAge = 30 * time.Second
 )
 
 // Deps are the collaborators of a Handler.
@@ -53,9 +60,10 @@ type Deps struct {
 // play in order and never overlap, while other rooms are not held up. Test
 // plays take the same per-area lock.
 type Handler struct {
-	deps Deps
-	log  *slog.Logger
-	now  func() time.Time
+	deps        Deps
+	log         *slog.Logger
+	now         func() time.Time // clock; tests replace it
+	areaTimeout time.Duration
 
 	mu        sync.Mutex
 	areaLocks map[string]*sync.Mutex
@@ -70,11 +78,18 @@ func New(d Deps) *Handler {
 		log = slog.Default()
 	}
 	return &Handler{
-		deps:      d,
-		log:       log.With("component", "scan"),
-		now:       time.Now,
-		areaLocks: make(map[string]*sync.Mutex),
+		deps:        d,
+		log:         log.With("component", "scan"),
+		now:         time.Now,
+		areaTimeout: areaTimeout,
+		areaLocks:   make(map[string]*sync.Mutex),
 	}
+}
+
+// queued is a scan waiting for its area worker.
+type queued struct {
+	scan  model.Scan
+	fired time.Time // the event's TimeFired; zero = unknown, so no age check
 }
 
 // tagScanned is the data of a tag_scanned event.
@@ -101,7 +116,7 @@ func (h *Handler) Run(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	workers := make(map[string]chan model.Scan)
+	workers := make(map[string]chan queued)
 	for {
 		select {
 		case <-ctx.Done():
@@ -123,9 +138,11 @@ func (h *Handler) scanFromEvent(ev ha.Event) model.Scan {
 }
 
 // dispatch filters the reader and queues the scan on its area's worker.
-func (h *Handler) dispatch(ctx context.Context, ev ha.Event, workers map[string]chan model.Scan, wg *sync.WaitGroup) {
+func (h *Handler) dispatch(ctx context.Context, ev ha.Event, workers map[string]chan queued, wg *sync.WaitGroup) {
 	s := h.scanFromEvent(ev)
-	areaID, allowed, err := h.deps.Rooms.DeviceArea(ctx, s.DeviceID, h.deps.Settings.Settings().Readers.Integrations)
+	actx, cancel := context.WithTimeout(ctx, h.areaTimeout)
+	areaID, allowed, err := h.deps.Rooms.DeviceArea(actx, s.DeviceID, h.deps.Settings.Settings().Readers.Integrations)
+	cancel()
 	switch {
 	case err != nil:
 		h.record(s, model.ScanError, "", fmt.Errorf("reader area: %w", err))
@@ -141,7 +158,7 @@ func (h *Handler) dispatch(ctx context.Context, ev ha.Event, workers map[string]
 
 	q, ok := workers[areaID]
 	if !ok {
-		q = make(chan model.Scan, areaQueueSize)
+		q = make(chan queued, areaQueueSize)
 		workers[areaID] = q
 		wg.Add(1)
 		go func() {
@@ -150,22 +167,30 @@ func (h *Handler) dispatch(ctx context.Context, ev ha.Event, workers map[string]
 				select {
 				case <-ctx.Done():
 					return
-				case s := <-q:
-					h.handle(ctx, s)
+				case item := <-q:
+					h.handle(ctx, item)
 				}
 			}
 		}()
 	}
 	select {
-	case q <- s:
+	case q <- queued{scan: s, fired: ev.TimeFired}:
 	default:
 		h.record(s, model.ScanError, "", errors.New("area busy, scan dropped"))
 	}
 }
 
-// handle matches the scan to an entry, or to the "Artist — Album" search
-// fallback, and plays it.
-func (h *Handler) handle(ctx context.Context, s model.Scan) {
+// handle drops a scan older than MaxScanAge, then matches it to an entry,
+// or to the "Artist — Album" search fallback, and plays it.
+func (h *Handler) handle(ctx context.Context, item queued) {
+	s := item.scan
+	if !item.fired.IsZero() {
+		// A negative age is clock skew between HA and us; play it.
+		if age := h.now().Sub(item.fired); age > MaxScanAge {
+			h.record(s, model.ScanIgnored, "", fmt.Errorf("scan is %s old, over the %s limit; not played", age.Round(time.Second), MaxScanAge))
+			return
+		}
+	}
 	if s.TagName == "" && s.TagID != "" {
 		s.TagName = h.tagName(ctx, s.TagID)
 	}
@@ -299,10 +324,10 @@ func (h *Handler) record(s model.Scan, result model.ScanResult, playerName strin
 		s.Error = err.Error()
 		attrs = append(attrs, "err", err)
 	}
-	switch result {
-	case model.ScanError:
+	switch {
+	case result == model.ScanError:
 		h.log.Error("scan", attrs...)
-	case model.ScanIgnored:
+	case result == model.ScanIgnored && err == nil: // reader filter: routine noise
 		h.log.Debug("scan", attrs...)
 	default:
 		h.log.Info("scan", attrs...)

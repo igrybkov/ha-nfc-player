@@ -16,22 +16,54 @@ type doc struct {
 
 func defDoc() doc { return doc{Version: 1, Names: []string{}} }
 
-func TestLoadCreatesMissingFileWithDefault(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "doc.yaml")
+func TestLoadMissingFileDoesNotWrite(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sub")
+	path := filepath.Join(dir, "doc.yaml")
 	f := Open(path, defDoc)
 
-	v, err := f.Load()
-	if err != nil {
+	for range 2 {
+		v, err := f.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Version != 1 || v.Names == nil {
+			t.Fatalf("got %+v, want default", v)
+		}
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("Load wrote to disk (stat err %v)", err)
+	}
+
+	// A file that shows up later (a seed copied in) is read.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if v.Version != 1 || v.Names == nil {
-		t.Fatalf("got %+v, want default", v)
+	if err := os.WriteFile(path, []byte("version: 3\nnames: [seed]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := f.Load(); err != nil || v.Version != 3 || len(v.Names) != 1 {
+		t.Fatalf("after the seed: %+v, %v", v, err)
+	}
+	// And a file removed again gives the default, not the stale content.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := f.Load(); err != nil || v.Version != 1 {
+		t.Fatalf("after removal: %+v, %v", v, err)
+	}
+}
+
+func TestUpdateCreatesMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "doc.yaml")
+	f := Open(path, defDoc)
+	if err := f.Update(func(d *doc) error { d.Names = append(d.Names, "a"); return nil }); err != nil {
+		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("file not created: %v", err)
 	}
-	if !strings.Contains(string(raw), "version: 1") {
+	if !strings.Contains(string(raw), "version: 1") || !strings.Contains(string(raw), "- a") {
 		t.Fatalf("unexpected content %q", raw)
 	}
 	st, _ := os.Stat(path)

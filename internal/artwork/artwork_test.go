@@ -3,13 +3,16 @@ package artwork
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +35,7 @@ type fakeApple struct {
 	search string            // artworkUrl100 for any search ("" = no results)
 	pages  map[string]string // path → og:image content
 	gate   chan struct{}     // when set, /search waits for it to close
+	status int               // when set, /search and /lookup answer with it
 }
 
 func newFakeApple(t *testing.T) *fakeApple {
@@ -54,6 +58,10 @@ func (f *fakeApple) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"resultCount": len(rs), "results": rs})
 	}
 	switch {
+	case f.status != 0 && (r.URL.Path == "/lookup" || r.URL.Path == "/search"):
+		w.WriteHeader(f.status)
+	case r.URL.Path == "/redirect":
+		http.Redirect(w, r, r.URL.Query().Get("to"), http.StatusFound)
 	case r.URL.Path == "/lookup":
 		results(f.lookup[r.URL.Query().Get("id")])
 	case r.URL.Path == "/search":
@@ -97,8 +105,14 @@ func pngBytes(t *testing.T, w, h int) []byte {
 	return buf.Bytes()
 }
 
+// cache returns a Cache that may use the fake: its host is the only one the
+// chain allows, and the dial guard is off so 127.0.0.1 is reachable.
 func (f *fakeApple) cache(t *testing.T) *Cache {
-	return &Cache{Dir: t.TempDir(), ConfigDir: t.TempDir(), HTTP: f.srv.Client(), ITunesURL: f.srv.URL}
+	return &Cache{
+		Dir: t.TempDir(), ConfigDir: t.TempDir(), HTTP: f.srv.Client(), ITunesURL: f.srv.URL,
+		AllowHost:    func(host string) bool { return host == "127.0.0.1" },
+		allowPrivate: true,
+	}
 }
 
 func TestResolveURLChain(t *testing.T) {
@@ -395,5 +409,182 @@ func TestIndexURLServerErrorKeepsEntry(t *testing.T) {
 	}
 	if n := f.count("/search"); n != 0 {
 		t.Errorf("a 503 re-ran the chain (%d searches)", n)
+	}
+}
+
+func TestChainHostAllowlist(t *testing.T) {
+	f := newFakeApple(t)
+	f.search = f.srv.URL + "/img/s/100x100bb.jpg"
+	c := f.cache(t)
+	c.AllowHost = nil // default: Apple hosts only
+	e := model.Entry{Name: "Muse — Origin", URL: f.srv.URL + "/us/album/origin/7"}
+
+	_, err := c.Artwork(context.Background(), e, false)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (blocked steps are a clean miss)", err)
+	}
+	for _, p := range []string{"/lookup", "/search", "/us/album/origin/7"} {
+		if n := f.count(p); n != 0 {
+			t.Errorf("%s fetched %d times from a host outside the allowlist", p, n)
+		}
+	}
+
+	for host, want := range map[string]bool{
+		"music.apple.com": true, "itunes.apple.com": true, "is1-ssl.mzstatic.com": true,
+		"mzstatic.com": false, "evilmzstatic.com": false, "apple.com": false, "127.0.0.1": false,
+	} {
+		if got := DefaultAllowHost(host); got != want {
+			t.Errorf("DefaultAllowHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+func TestChainRedirectChecked(t *testing.T) {
+	f := newFakeApple(t)
+	other := newFakeApple(t)
+	c := f.cache(t)
+	e := model.Entry{Name: "Redirected"}
+	key := e.Name + "\n"
+	// The second server is reached as "localhost", which AllowHost refuses.
+	target := strings.Replace(other.srv.URL, "127.0.0.1", "localhost", 1) + "/img/x.png"
+	if err := c.updateIndex(func(i map[string]string) { i[key] = f.srv.URL + "/redirect?to=" + target }); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.Artwork(context.Background(), e, false)
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("err = %v, want ErrBlocked", err)
+	}
+	if n := other.count("/img/x.png"); n != 0 {
+		t.Errorf("redirect target fetched %d times", n)
+	}
+
+	// The same redirect to an allowed host works.
+	if err := c.updateIndex(func(i map[string]string) { i[key] = f.srv.URL + "/redirect?to=/img/y.png" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Artwork(context.Background(), e, false); err != nil {
+		t.Fatalf("allowed redirect: %v", err)
+	}
+}
+
+func TestOverrideDialGuard(t *testing.T) {
+	f := newFakeApple(t)
+	c := f.cache(t)
+	c.allowPrivate = false
+	u := f.srv.URL + "/img/override.png"
+	e := model.Entry{Name: "Local", Label: model.LabelOverrides{Artwork: &u}}
+	_, err := c.Artwork(context.Background(), e, false)
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("err = %v, want ErrBlocked for a loopback override", err)
+	}
+	if n := f.count("/img/override.png"); n != 0 {
+		t.Errorf("loopback override fetched %d times", n)
+	}
+	if isTransient(err) {
+		t.Error("a blocked dial counts as transient")
+	}
+}
+
+func TestPublicIP(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"8.8.8.8": true, "17.253.144.10": true, "2606:4700::1111": true,
+		"127.0.0.1": false, "::1": false, "10.1.2.3": false, "172.16.0.1": false, "192.168.40.20": false,
+		"100.64.0.1": false, "100.127.255.254": false, "169.254.169.254": false, "fe80::1": false,
+		"fc00::1": false, "0.0.0.0": false, "::": false, "224.0.0.1": false, "ff02::1": false,
+		"::ffff:10.0.0.1": false, "::ffff:8.8.8.8": true,
+	} {
+		if got := publicIP(netip.MustParseAddr(addr)); got != want {
+			t.Errorf("publicIP(%s) = %v, want %v", addr, got, want)
+		}
+	}
+}
+
+func TestTransientErrorIsNotCached(t *testing.T) {
+	f := newFakeApple(t)
+	f.status = http.StatusServiceUnavailable
+	c := f.cache(t)
+	e := model.Entry{Name: "Flaky — Search"}
+	ctx := context.Background()
+
+	for i := 1; i <= 2; i++ {
+		_, err := c.Artwork(ctx, e, false)
+		if err == nil || errors.Is(err, ErrNotFound) {
+			t.Fatalf("call %d: err = %v, want a transient error, not ErrNotFound", i, err)
+		}
+		if n := f.count("/search"); n != i {
+			t.Errorf("call %d: searches = %d; a transient failure was cached", i, n)
+		}
+	}
+
+	// A 4xx is a clean answer: that miss is cached.
+	f.status = http.StatusBadRequest
+	for range 2 {
+		if _, err := c.Artwork(ctx, e, false); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("err = %v, want ErrNotFound", err)
+		}
+	}
+	if n := f.count("/search"); n != 3 {
+		t.Errorf("searches = %d, want 3 (the 4xx miss is cached)", n)
+	}
+}
+
+// bombPNG is a valid tiny PNG whose header claims w×h pixels.
+func bombPNG(t *testing.T, w, h uint32) []byte {
+	data := pngBytes(t, 1, 1)
+	binary.BigEndian.PutUint32(data[16:], w)
+	binary.BigEndian.PutUint32(data[20:], h)
+	binary.BigEndian.PutUint32(data[29:], crc32.ChecksumIEEE(data[12:29]))
+	return data
+}
+
+func TestDecompressionBomb(t *testing.T) {
+	bomb := bombPNG(t, 10000, 10000) // 100 Mpx
+	if _, err := decodeImage(bomb); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("decodeImage: err = %v, want ErrTooLarge", err)
+	}
+	if _, err := decodeImage(bombPNG(t, 1, 1)); err != nil {
+		t.Fatalf("1x1 control image: %v", err)
+	}
+
+	f := newFakeApple(t)
+	c := f.cache(t)
+	ctx := context.Background()
+
+	// Override file.
+	if err := os.WriteFile(filepath.Join(c.ConfigDir, "bomb.png"), bomb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := "bomb.png"
+	if _, err := c.Artwork(ctx, model.Entry{Name: "F", Label: model.LabelOverrides{Artwork: &p}}, false); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("override file: err = %v, want ErrTooLarge", err)
+	}
+
+	// Cache file: a planted bomb is not decoded; the image is downloaded again.
+	u := f.srv.URL + "/img/cached.png"
+	if _, err := c.loadURL(ctx, u, false, true); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(c.Dir, imageDir))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("cache dir: %v, %v", entries, err)
+	}
+	if err := os.WriteFile(filepath.Join(c.Dir, imageDir, entries[0].Name()), bomb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.loadURL(ctx, u, false, true); err != nil {
+		t.Fatalf("after a planted bomb: %v", err)
+	}
+	if n := f.count("/img/cached.png"); n != 2 {
+		t.Errorf("downloads = %d, want 2 (the bomb in the cache was refused)", n)
+	}
+}
+
+func TestDownloadedBombRefused(t *testing.T) {
+	bomb := bombPNG(t, 8000, 8000) // 64 Mpx
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write(bomb) }))
+	t.Cleanup(srv.Close)
+	c := &Cache{Dir: t.TempDir(), HTTP: srv.Client(), allowPrivate: true}
+	if _, err := c.loadURL(context.Background(), srv.URL+"/a.png", false, false); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
 	}
 }

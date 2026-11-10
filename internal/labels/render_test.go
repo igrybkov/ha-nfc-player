@@ -83,6 +83,10 @@ func TestTemplateValidate(t *testing.T) {
 		{"zero font", func(tp *labels.Template) { tp.Font.SubtitlePt = 0 }, "font.subtitle_pt"},
 		{"unknown layout", func(tp *labels.Template) { tp.Layout = "nope" }, "not registered"},
 		{"no id", func(tp *labels.Template) { tp.ID = "" }, "id is required"},
+		{"too many slots", func(tp *labels.Template) { tp.Grid.Cols, tp.Grid.Rows = 40, 26 }, "grid.cols*grid.rows"},
+		{"overflowing grid", func(tp *labels.Template) { tp.Grid.Cols, tp.Grid.Rows = 1<<40, 1<<40 }, "grid.cols*grid.rows"},
+		{"huge page", func(tp *labels.Template) { tp.Page.HeightIn = 50.5 }, "page.height_in must be <= 50"},
+		{"huge label", func(tp *labels.Template) { tp.Label.WidthIn = 51 }, "label.width_in must be <= 50"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -99,6 +103,12 @@ func TestTemplateValidate(t *testing.T) {
 	// 2 × 0.1875 = 8.5. That must stay valid despite float error.
 	if err := builtinTemplate(t, "avery-5260").Validate(); err != nil {
 		t.Error(err)
+	}
+	// The caps themselves are allowed.
+	big := labels.Template{ID: "big", Page: labels.Size{WidthIn: 50, HeightIn: 50}, Label: labels.Size{WidthIn: 0.5, HeightIn: 1},
+		Grid: labels.Grid{Cols: 100, Rows: 10}, Layout: "side", Font: labels.FontSizes{TitlePt: 8, SubtitlePt: 6}}
+	if err := big.Validate(); err != nil {
+		t.Errorf("1000 slots on a 50 in page: %v", err)
 	}
 }
 

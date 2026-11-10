@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
@@ -163,7 +164,8 @@ func (r *Registry) Delete(id string) error {
 	})
 }
 
-// Validate checks required fields and value ranges.
+// Validate checks required fields, value ranges and that the URL is one
+// catalog.Parse reads, so a bad link is caught on save rather than on scan.
 func Validate(e model.Entry) error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalid)
@@ -173,6 +175,12 @@ func Validate(e model.Entry) error {
 	}
 	if strings.TrimSpace(e.URL) == "" {
 		return fmt.Errorf("%w: url is required", ErrInvalid)
+	}
+	if _, err := catalog.Parse(e.URL); err != nil {
+		if errors.Is(err, catalog.ErrUnsupported) {
+			return fmt.Errorf("%w: url must be a music.apple.com link or an apple_music://<kind>/<id> URI, not %q", ErrInvalid, e.URL)
+		}
+		return fmt.Errorf("%w: url: %v", ErrInvalid, err)
 	}
 	if !e.Repeat.Valid() {
 		return fmt.Errorf("%w: repeat must be off, one or all, not %q", ErrInvalid, e.Repeat)

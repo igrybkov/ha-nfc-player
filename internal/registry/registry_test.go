@@ -39,7 +39,7 @@ func TestSlug(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	ok := model.Entry{Name: "A — B", URL: "https://x", Repeat: model.RepeatAll}
+	ok := model.Entry{Name: "A — B", URL: "apple_music://album/1", Repeat: model.RepeatAll}
 	if err := Validate(ok); err != nil {
 		t.Fatalf("valid entry: %v", err)
 	}
@@ -53,12 +53,28 @@ func TestValidate(t *testing.T) {
 		func(e *model.Entry) { e.Volume = ptr(-1) },
 		func(e *model.Entry) { e.Player = ptr(" ") },
 		func(e *model.Entry) { e.TagIDs = []string{""} },
+		func(e *model.Entry) { e.URL = "https://example.com/us/album/x/1" },      // not Apple
+		func(e *model.Entry) { e.URL = "spotify:album:1" },                       // unsupported scheme
+		func(e *model.Entry) { e.URL = "apple_music://album/not-a-number" },      // parses, bad id
+		func(e *model.Entry) { e.URL = "https://music.apple.com/us/playlist/x" }, // no id
 	}
 	for i, mod := range bad {
 		e := ok
 		mod(&e)
 		if err := Validate(e); !errors.Is(err, ErrInvalid) {
 			t.Errorf("case %d: got %v, want ErrInvalid", i, err)
+		}
+	}
+	for _, u := range []string{
+		"https://music.apple.com/us/album/divisive/1646032515",
+		"https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5",
+		"apple_music://playlist/pl.abc",
+		"apple_music://artist/123",
+	} {
+		e := ok
+		e.URL = u
+		if err := Validate(e); err != nil {
+			t.Errorf("url %q: %v", u, err)
 		}
 	}
 	for _, v := range []int{0, 100} {
@@ -98,14 +114,14 @@ tags:
 	}
 }
 
-func TestAllOnMissingFileIsEmptyAndCreatesFile(t *testing.T) {
+func TestAllOnMissingFileIsEmptyAndWritesNothing(t *testing.T) {
 	r, path := newRegistry(t)
 	all := r.All()
 	if all == nil || len(all) != 0 {
 		t.Fatalf("got %#v, want empty slice", all)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("tags.yaml not created: %v", err)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("tags.yaml written on read (stat err %v)", err)
 	}
 }
 
@@ -162,25 +178,25 @@ func TestCRUD(t *testing.T) {
 
 func TestCreateConflicts(t *testing.T) {
 	r, _ := newRegistry(t)
-	a, err := r.Create(model.Entry{Name: "A — B", URL: "u", TagIDs: []string{"t1"}})
+	a, err := r.Create(model.Entry{Name: "A — B", URL: "apple_music://album/1", TagIDs: []string{"t1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Same normalized name.
-	if _, err := r.Create(entry("a — b | reader note", "u")); !errors.Is(err, ErrDuplicate) {
+	if _, err := r.Create(entry("a — b | reader note", "apple_music://album/1")); !errors.Is(err, ErrDuplicate) {
 		t.Errorf("same name: %v", err)
 	}
 	// Same tag id.
-	if _, err := r.Create(model.Entry{Name: "C", URL: "u", TagIDs: []string{"t1"}}); !errors.Is(err, ErrDuplicate) {
+	if _, err := r.Create(model.Entry{Name: "C", URL: "apple_music://album/1", TagIDs: []string{"t1"}}); !errors.Is(err, ErrDuplicate) {
 		t.Errorf("same tag id: %v", err)
 	}
 	// Explicit id taken.
-	if _, err := r.Create(model.Entry{ID: a.ID, Name: "Other", URL: "u"}); !errors.Is(err, ErrDuplicate) {
+	if _, err := r.Create(model.Entry{ID: a.ID, Name: "Other", URL: "apple_music://album/1"}); !errors.Is(err, ErrDuplicate) {
 		t.Errorf("explicit id: %v", err)
 	}
 	// Different name, same slug: suffix.
-	b, err := r.Create(entry("A / B", "u"))
+	b, err := r.Create(entry("A / B", "apple_music://album/1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,35 +211,35 @@ func TestCreateConflicts(t *testing.T) {
 
 func TestUpdateRules(t *testing.T) {
 	r, _ := newRegistry(t)
-	a, _ := r.Create(entry("A", "u"))
-	b, _ := r.Create(entry("B", "u"))
+	a, _ := r.Create(entry("A", "apple_music://album/1"))
+	b, _ := r.Create(entry("B", "apple_music://album/1"))
 
-	if _, err := r.Update("missing", entry("Z", "u")); !errors.Is(err, ErrNotFound) {
+	if _, err := r.Update("missing", entry("Z", "apple_music://album/1")); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing: %v", err)
 	}
-	if _, err := r.Update(a.ID, model.Entry{ID: "other", Name: "A", URL: "u"}); !errors.Is(err, ErrInvalid) {
+	if _, err := r.Update(a.ID, model.Entry{ID: "other", Name: "A", URL: "apple_music://album/1"}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("id change: %v", err)
 	}
-	if _, err := r.Update(b.ID, entry("a", "u")); !errors.Is(err, ErrDuplicate) {
+	if _, err := r.Update(b.ID, entry("a", "apple_music://album/1")); !errors.Is(err, ErrDuplicate) {
 		t.Errorf("rename onto other: %v", err)
 	}
 	// Renaming itself (case change) is fine.
-	if _, err := r.Update(a.ID, entry("a", "u2")); err != nil {
+	if _, err := r.Update(a.ID, entry("a", "apple_music://album/2")); err != nil {
 		t.Errorf("self rename: %v", err)
 	}
 }
 
 func TestLookup(t *testing.T) {
 	r, _ := newRegistry(t)
-	if _, err := r.Create(model.Entry{Name: "Metallica — Essential", URL: "u1"}); err != nil {
+	if _, err := r.Create(model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Create(model.Entry{Name: "Other", URL: "u2", TagIDs: []string{"tag-9"}}); err != nil {
+	if _, err := r.Create(model.Entry{Name: "Other", URL: "apple_music://album/2", TagIDs: []string{"tag-9"}}); err != nil {
 		t.Fatal(err)
 	}
 
 	e, ok := r.ByName(model.NormalizeName(" METALLICA — essential | living room"))
-	if !ok || e.URL != "u1" {
+	if !ok || e.URL != "apple_music://album/1" {
 		t.Fatalf("ByName: %+v %v", e, ok)
 	}
 	if _, ok := r.ByName(""); ok {
@@ -234,7 +250,7 @@ func TestLookup(t *testing.T) {
 	}
 
 	e, ok = r.ByTagID("tag-9")
-	if !ok || e.URL != "u2" {
+	if !ok || e.URL != "apple_music://album/2" {
 		t.Fatalf("ByTagID: %+v %v", e, ok)
 	}
 	if _, ok := r.ByTagID(""); ok {
@@ -250,7 +266,7 @@ func TestLookup(t *testing.T) {
 
 func TestBrokenFileKeepsServingLastGood(t *testing.T) {
 	r, path := newRegistry(t)
-	if _, err := r.Create(entry("A", "u")); err != nil {
+	if _, err := r.Create(entry("A", "apple_music://album/1")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("tags: [oops\n"), 0o644); err != nil {
@@ -259,7 +275,7 @@ func TestBrokenFileKeepsServingLastGood(t *testing.T) {
 	if _, ok := r.ByName("a"); !ok {
 		t.Fatal("lookup must use the last good content")
 	}
-	if _, err := r.Create(entry("B", "u")); err == nil {
+	if _, err := r.Create(entry("B", "apple_music://album/1")); err == nil {
 		t.Fatal("create must fail while the file is broken")
 	}
 }

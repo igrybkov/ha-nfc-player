@@ -55,6 +55,11 @@ func officeHA() *hatest.Fake {
 	}
 }
 
+// testClient does not pool connections. A pooled transport can dial a spare
+// connection that never sends a request, and http.Server.Shutdown waits up
+// to 5s for such a connection, which is the shutdown limit checked below.
+var testClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 30 * time.Second}
+
 // app is a running run() with its base URL.
 type app struct {
 	base    string
@@ -111,7 +116,7 @@ func (a *app) shutdown(t *testing.T) {
 
 func (a *app) get(t *testing.T, path string) (int, string, []byte) {
 	t.Helper()
-	resp, err := http.Get(a.base + path)
+	resp, err := testClient.Get(a.base + path)
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}
@@ -123,7 +128,7 @@ func (a *app) get(t *testing.T, path string) (int, string, []byte) {
 func (a *app) post(t *testing.T, path string, v any) (int, string, []byte) {
 	t.Helper()
 	raw, _ := json.Marshal(v)
-	resp, err := http.Post(a.base+path, "application/json", bytes.NewReader(raw))
+	resp, err := testClient.Post(a.base+path, "application/json", bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}

@@ -107,7 +107,8 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Storage. Missing files are created with defaults on first load.
+	// Storage. A missing file reads as its defaults and is created on the
+	// first save, so nothing is written to config_dir until the user saves.
 	tags := registry.New(store.Open(cfg.Path(config.TagsFile), registry.DefaultTagsFile))
 	settings := config.NewSettingsStore(store.Open(cfg.Path(config.SettingsFile), model.DefaultSettings))
 	templates, err := config.NewTemplateStore(store.Open(cfg.Path(config.TemplatesFile), emptyList[labels.Template]))

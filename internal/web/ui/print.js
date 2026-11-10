@@ -94,8 +94,25 @@ export async function render(view) {
   // Sheet map.
   const sheet = h('div', { class: 'sheets' });
   const summary = h('p', { class: 'muted small' });
+  // The PDF opens in a new tab, so the page can't read its X-Missing-Art
+  // header; this warning from the preview is what the user sees.
+  const missingBox = h('div', { class: 'warning small', role: 'status', hidden: true });
+  const showMissing = (missing) => {
+    missingBox.hidden = !missing.length;
+    if (!missing.length) { missingBox.replaceChildren(); return; }
+    const n = missing.length;
+    // Built through h(), which drops the false separator before the first link.
+    missingBox.replaceChildren(h('span', {},
+      h('strong', { text: `${n} entr${n === 1 ? 'y has' : 'ies have'} no art and will print without it: ` }),
+      missing.map((m, i) => [i > 0 && ', ',
+        h('a', { href: `#/tags/edit/${encodeURIComponent(m.id)}`, text: m.name })])));
+  };
   let timer = 0;
   let seq = 0;
+  // The preview looks up art, which can be slow when a lookup fails. Abort
+  // the previous request so stale previews don't hold the connections that
+  // thumbnails need; the server stops on the closed request.
+  let inflight = null;
   function schedulePreview() {
     clearTimeout(timer);
     timer = setTimeout(preview, 150);
@@ -105,20 +122,25 @@ export async function render(view) {
     if (!t) return;
     startLabel.textContent = `Start: row ${state.row}, column ${state.col}`;
     const my = ++seq;
+    inflight?.abort();
+    inflight = null;
     let pages;
     if (state.selected.length === 0) {
       // Nothing to print yet: show where printing would start.
       const start = (state.row - 1) * t.grid.cols + (state.col - 1);
       pages = [Array.from({ length: t.grid.cols * t.grid.rows }, (_, i) => (i < start ? 'used' : 'free'))];
       summary.textContent = 'Pick entries to see where labels land.';
+      showMissing([]);
     } else {
       try {
-        const r = await post('api/print/preview', job());
+        inflight = new AbortController();
+        const r = await post('api/print/preview', job(), inflight.signal);
         if (my !== seq) return;
         pages = r.pages;
         summary.textContent = `${r.labels} label${r.labels === 1 ? '' : 's'} on ${pages.length} sheet${pages.length === 1 ? '' : 's'}.`;
+        showMissing(r.missing_art || []);
       } catch (e) {
-        if (my === seq) summary.textContent = e.message;
+        if (my === seq && e.name !== 'AbortError') summary.textContent = e.message;
         return;
       }
     }
@@ -167,10 +189,10 @@ export async function render(view) {
           h('div', { class: 'legend small' },
             h('span', { class: 'slot used' }), 'used ', h('span', { class: 'slot printed' }), 'to print ',
             h('span', { class: 'slot free' }), 'free')),
-        sheet, summary,
+        sheet, summary, missingBox,
         h('div', { class: 'actions' }, generate))),
   );
   drawSelected();
   preview();
-  return sl.destroy;
+  return () => { clearTimeout(timer); inflight?.abort(); sl.destroy(); };
 }

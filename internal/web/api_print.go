@@ -7,6 +7,7 @@ import (
 	"image"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -36,7 +37,7 @@ type printRequest struct {
 const (
 	maxCopies   = 100
 	maxSkip     = 1000
-	maxSample   = 500
+	maxSample   = labels.MaxSlots // a template outline preview fills one sheet
 	maxLabels   = 2000
 	artParallel = 4
 )
@@ -46,7 +47,19 @@ type previewResponse struct {
 	Rows   int                  `json:"rows"`
 	Labels int                  `json:"labels"`
 	Pages  [][]labels.SlotState `json:"pages"`
+	// MissingArt lists the picked entries that would print without art.
+	// Empty for outline previews, which print no art.
+	MissingArt []entryRef `json:"missing_art"`
 }
+
+type entryRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// missingArtHeader carries, on the PDF, the number of picked entries that
+// printed without art. Each of them printed once per copy.
+const missingArtHeader = "X-Missing-Art"
 
 func (s *Server) printPreview(w http.ResponseWriter, r *http.Request) {
 	var req printRequest
@@ -64,12 +77,32 @@ func (s *Server) printPreview(w http.ResponseWriter, r *http.Request) {
 	if pages == nil {
 		pages = [][]labels.SlotState{}
 	}
+	// Art comes from the same source and timeouts as the PDF, so the
+	// warning matches what prints. Cached art makes repeat previews cheap.
+	missing := []entryRef{}
+	if !req.Outline && len(entries) > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), printTimeout)
+		defer cancel()
+		missing = missingArt(entries, s.fetchArt(ctx, entries))
+	}
 	writeJSON(w, http.StatusOK, previewResponse{
-		Cols:   job.Template.Grid.Cols,
-		Rows:   job.Template.Grid.Rows,
-		Labels: len(job.Items) * job.Copies,
-		Pages:  pages,
+		Cols:       job.Template.Grid.Cols,
+		Rows:       job.Template.Grid.Rows,
+		Labels:     len(job.Items) * job.Copies,
+		Pages:      pages,
+		MissingArt: missing,
 	})
+}
+
+// missingArt lists the entries whose art is nil. art is parallel to entries.
+func missingArt(entries []model.Entry, art []image.Image) []entryRef {
+	out := []entryRef{}
+	for i, e := range entries {
+		if art[i] == nil {
+			out = append(out, entryRef{ID: e.ID, Name: e.Name})
+		}
+	}
+	return out
 }
 
 // printPDF accepts JSON, or a form post with the JSON in the "job" field so
@@ -99,6 +132,9 @@ func (s *Server) printPDF(w http.ResponseWriter, r *http.Request) {
 	if err := s.lbl.Render(&buf, job); err != nil {
 		s.writeErr(w, r, fmt.Errorf("render PDF: %w", err))
 		return
+	}
+	if !req.Outline {
+		w.Header().Set(missingArtHeader, strconv.Itoa(len(missingArt(entries, art))))
 	}
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="labels-%s.pdf"`, safeFilename(job.Template.ID)))

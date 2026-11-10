@@ -55,6 +55,17 @@ HA_TOKEN=<long-lived access token>
 Data goes to `./data` and config files to `./dev-config`. The UI is at
 <http://localhost:8099>. Set `LISTEN` to change the address.
 
+The UI has no login. Outside Supervisor, `LISTEN` defaults to
+`127.0.0.1:8099`, so only your own machine can reach it. Under Supervisor
+it is `:8099`, and the app only accepts the Ingress gateway. In a plain
+`docker run`, a loopback address is unreachable from the host: set
+`-e LISTEN=:8099` and publish the port to the interface you trust, e.g.
+`-p 127.0.0.1:8099:8099`.
+
+UI responses carry a Content-Security-Policy (`default-src 'self'`, no
+inline scripts, `frame-ancestors 'self'`). Keep new UI code in the `.js`
+modules: inline `<script>` and `on…=` attributes will not run.
+
 `make docker` needs a buildx builder that supports multi-platform builds
 (the `docker-container` driver, or the containerd image store). Pick one
 with `make docker BUILDER=<name>`.

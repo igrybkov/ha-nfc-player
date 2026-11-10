@@ -1,6 +1,6 @@
 // Tags screen: searchable entry list and the entry editor.
 import {
-  h, get, post, put, del, toast, run, highlight, thumb, artURL, searchList,
+  h, get, post, put, del, toast, run, highlight, thumb, artURL, bumpArt, searchList,
   field, num, readNum, select, confirmDelete, splitName, focusIfDesktop,
 } from './lib.js';
 
@@ -65,7 +65,10 @@ async function editor(view, id, params) {
   }
 
   const name = h('input', { value: entry.name, required: true, placeholder: 'Artist — Album' });
-  const url = h('input', { value: entry.url, type: 'url', required: true, placeholder: 'https://music.apple.com/…' });
+  // type=text: the browser's URL check rejects apple_music:// (underscore in
+  // the scheme). The server validates the link.
+  const url = h('input', { value: entry.url, type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false',
+    required: true, placeholder: 'https://music.apple.com/…' });
   const shuffle = h('input', { type: 'checkbox', checked: entry.shuffle });
   const repeat = select([['all', 'All'], ['one', 'One'], ['off', 'Off']], entry.repeat);
   const volume = num(entry.volume, { min: 0, max: 100, step: 1, placeholder: 'Room default' });
@@ -112,6 +115,8 @@ async function editor(view, id, params) {
   const showArt = (refresh) => {
     if (!entry.id) return;
     art.classList.remove('missing');
+    // Once refreshed art loads, list and Print thumbnails must ask again.
+    if (refresh) art.addEventListener('load', () => bumpArt(entry.id), { once: true });
     art.src = artURL(entry, 400) + (refresh ? `&refresh=1&t=${Date.now()}` : '');
   };
   showArt(false);

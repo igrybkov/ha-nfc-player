@@ -251,9 +251,13 @@ func (c *WSClient) Run(ctx context.Context) error {
 }
 
 // runSession runs one connection until it fails. connected reports whether
-// auth succeeded, so Run can reset the backoff.
+// auth and resubscribe succeeded, so Run can reset the backoff.
 func (c *WSClient) runSession(ctx context.Context) (connected bool, err error) {
-	ws, _, err := websocket.Dial(ctx, c.opts.URL, nil)
+	// The timeout bounds the TCP connect and the handshake only; Dial does
+	// not tie the returned connection to its context.
+	dctx, dcancel := context.WithTimeout(ctx, authTimeout)
+	ws, _, err := websocket.Dial(dctx, c.opts.URL, nil)
+	dcancel()
 	if err != nil {
 		return false, fmt.Errorf("dial: %w", err)
 	}
@@ -301,9 +305,17 @@ func (c *WSClient) runSession(ctx context.Context) (connected bool, err error) {
 
 	// Ping first: it also guards the resubscribe below against a stalled HA.
 	go c.ping(sctx, s)
+	// A refused subscription would leave scans unheard on a connection that
+	// looks healthy, so drop it and let Run retry. Report connected=false so
+	// the backoff grows instead of retrying every second. ErrDisconnected
+	// needs nothing here: the read loop has already ended.
 	for _, sub := range subs {
 		if err := s.subscribe(sctx, sub); err != nil {
 			c.log.Error("subscribe failed", "event_type", sub.eventType, "err", err)
+			if !errors.Is(err, ErrDisconnected) {
+				return false, fmt.Errorf("resubscribe %s: %w", sub.eventType, err)
+			}
+			break
 		}
 	}
 

@@ -42,9 +42,11 @@ func (f *File[T]) Path() string { return f.path }
 
 // Load returns the current value, re-reading the file if it changed.
 //
-// A missing file is created with the default value. If the file does not
-// decode, Load returns the last good value (or the default) together with the
-// error, so callers can keep working and report the problem.
+// A missing file gives the default value and is not created: reads never
+// write, so the HA config repo gets no files nobody chose to save. The file
+// appears on the first Save or Update. If the file does not decode, Load
+// returns the last good value (or the default) together with the error, so
+// callers can keep working and report the problem.
 func (f *File[T]) Load() (T, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -79,10 +81,10 @@ func (f *File[T]) load() (T, error) {
 	st, err := os.Stat(f.path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		if err := f.save(f.def()); err != nil {
-			return f.def(), fmt.Errorf("create %s: %w", f.path, err)
-		}
-		return f.decode(f.data)
+		// Forget what was read before, so a file copied in later (a seed
+		// file, a git pull) is read in full on the next Load.
+		f.stat, f.data, f.err = nil, nil, nil
+		return f.def(), nil
 	case err != nil:
 		return f.last(), fmt.Errorf("stat %s: %w", f.path, err)
 	}

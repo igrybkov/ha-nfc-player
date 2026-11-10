@@ -10,6 +10,7 @@ import { h } from './lib.js';
 
 const screens = { tags, scans, print, templates, backgrounds, settings };
 let cleanup = null;
+let seq = 0;
 
 // parseHash turns "#/tags/edit?name=x" into {screen, rest, params}.
 function parseHash() {
@@ -18,7 +19,12 @@ function parseHash() {
   return { screen: screen || 'tags', rest, params: new URLSearchParams(query) };
 }
 
+// route renders the screen for the hash. Each route gets its own container,
+// attached at once, so a slower earlier route that resolves late writes into
+// a detached node and never replaces the newer screen. Its cleanup runs as
+// soon as it resolves, so its listeners don't leak.
 async function route() {
+  const my = ++seq;
   const { screen, rest, params } = parseHash();
   const mod = screens[screen] || tags;
   if (cleanup) cleanup();
@@ -26,13 +32,17 @@ async function route() {
   for (const a of document.querySelectorAll('#nav a')) {
     a.toggleAttribute('aria-current', a.dataset.screen === screen);
   }
-  const view = document.getElementById('view');
-  view.replaceChildren(h('p', { class: 'muted', text: 'Loading…' }));
+  const view = h('div', { class: 'screen' }, h('p', { class: 'muted', text: 'Loading…' }));
+  document.getElementById('view').replaceChildren(view);
+  let done = null;
   try {
-    cleanup = (await mod.render(view, rest, params)) || null;
+    done = (await mod.render(view, rest, params)) || null;
   } catch (e) {
-    view.replaceChildren(h('p', { class: 'error', text: `Could not load: ${e.message}` }));
+    if (my === seq) view.replaceChildren(h('p', { class: 'error', text: `Could not load: ${e.message}` }));
+    return;
   }
+  if (my === seq) cleanup = done;
+  else if (done) done();
 }
 
 window.addEventListener('hashchange', route);

@@ -7,6 +7,8 @@
   --primary: #0288d1;
   --primary-fg: #ffffff;
   --danger: #c62828;
+  --warn-bg: #fff3e0;
+  --warn-line: #ef6c00;
   --mark: #fff59d;
   --used: #bdbdbd;
   --printed: #0288d1;
@@ -25,6 +27,8 @@
     --primary: #4fc3f7;
     --primary-fg: #0b0b0b;
     --danger: #ef5350;
+    --warn-bg: #3a2600;
+    --warn-line: #ffb74d;
     --mark: #6d5f00;
     --used: #555555;
     --printed: #4fc3f7;
@@ -39,6 +43,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .muted { color: var(--muted); }
 .small { font-size: 0.85em; }
 .error { color: var(--danger); }
+.warning { background: var(--warn-bg); border-left: 3px solid var(--warn-line); padding: 8px 10px; border-radius: 4px; overflow-wrap: anywhere; }
 .grow { flex: 1; min-width: 0; }
 
 /* Top navigation scrolls sideways on a phone. */

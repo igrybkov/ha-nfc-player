@@ -27,9 +27,10 @@ function append(el, children) {
   }
 }
 
-// API calls use relative URLs only, so they work under Ingress.
-export async function api(method, path, body) {
-  const opts = { method, headers: {} };
+// API calls use relative URLs only, so they work under Ingress. signal
+// (an AbortSignal) cancels the request.
+export async function api(method, path, body, signal) {
+  const opts = { method, headers: {}, signal };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -43,7 +44,7 @@ export async function api(method, path, body) {
 }
 
 export const get = (p) => api('GET', p);
-export const post = (p, b) => api('POST', p, b);
+export const post = (p, b, signal) => api('POST', p, b, signal);
 export const put = (p, b) => api('PUT', p, b);
 export const del = (p) => api('DELETE', p);
 
@@ -94,10 +95,21 @@ export function splitName(name) {
 // normalizeName mirrors model.NormalizeName.
 export const normalizeName = (n) => n.split('|')[0].trim().toLowerCase();
 
-// artURL is cache-safe: the version changes when the art source changes.
+// artBumps holds, per entry id, when "Refresh art" last loaded new art.
+const artBumps = new Map();
+
+// bumpArt marks an entry's art as changed. Browsers reuse an image URL the
+// page already loaded without asking the server, so the next artURL for the
+// entry must differ. After a reload, the server's ETag catches the change.
+export function bumpArt(id) {
+  artBumps.set(id, Date.now());
+}
+
+// artURL changes when the art source (url, override) or a refresh changes it.
 export function artURL(entry, size) {
   const v = hash(`${entry.url}|${entry.label?.artwork ?? ''}`);
-  return `api/tags/${encodeURIComponent(entry.id)}/artwork?size=${size}&v=${v}`;
+  const bump = artBumps.get(entry.id);
+  return `api/tags/${encodeURIComponent(entry.id)}/artwork?size=${size}&v=${v}${bump ? `&r=${bump}` : ''}`;
 }
 
 function hash(s) {
