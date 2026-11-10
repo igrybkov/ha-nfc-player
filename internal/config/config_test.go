@@ -91,21 +91,6 @@ func TestLoadErrors(t *testing.T) {
 	}
 }
 
-func TestWebsocketURL(t *testing.T) {
-	cases := map[string]string{
-		"http://hass.local:8123":           "ws://hass.local:8123/api/websocket",
-		"https://hass.example":             "wss://hass.example/api/websocket",
-		"wss://hass.example/api/websocket": "wss://hass.example/api/websocket",
-		"ws://proxy/core/websocket":        "ws://proxy/core/websocket",
-	}
-	for in, want := range cases {
-		got, err := websocketURL(in)
-		if err != nil || got != want {
-			t.Errorf("websocketURL(%q) = %q, %v; want %q", in, got, err, want)
-		}
-	}
-}
-
 func newSettings(t *testing.T) (*SettingsStore, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), SettingsFile)

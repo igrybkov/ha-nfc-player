@@ -5,6 +5,7 @@
 .dockerignore
 Dockerfile
 docs/
+examples/
 nfc_player/
 repository.yaml
 README.md

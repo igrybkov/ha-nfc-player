@@ -28,6 +28,8 @@ jobs:
         run: make test
       - name: Staticcheck
         run: make lint
+      - name: UI tests
+        run: make test-ui
       - name: Cross-build
         run: |
           for arch in amd64 arm64; do

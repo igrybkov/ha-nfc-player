@@ -11,12 +11,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
@@ -46,8 +46,7 @@ func (c Config) Path(name string) string { return filepath.Join(c.ConfigDir, nam
 const (
 	defaultDataDir   = "/data"
 	defaultConfigDir = "/homeassistant/nfc_player"
-	defaultListen    = ":8099"
-	supervisorWSURL  = "ws://supervisor/core/websocket"
+	DefaultListen    = ":8099" // LISTEN default; the healthcheck reads it too
 )
 
 // options is /data/options.json, written by Supervisor from the app options.
@@ -71,7 +70,7 @@ func Load() (Config, error) { return load(os.Getenv, os.ReadFile) }
 func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Config, error) {
 	c := Config{
 		DataDir: firstNonEmpty(getenv("DATA_DIR"), defaultDataDir),
-		Listen:  firstNonEmpty(getenv("LISTEN"), defaultListen),
+		Listen:  firstNonEmpty(getenv("LISTEN"), DefaultListen),
 	}
 
 	var opts options
@@ -95,7 +94,7 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 
 	if tok := getenv("SUPERVISOR_TOKEN"); tok != "" {
 		c.Supervisor = true
-		c.HAURL = supervisorWSURL
+		c.HAURL = ha.SupervisorURL
 		c.HAToken = tok
 		return c, nil
 	}
@@ -104,36 +103,11 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 	if getenv("HA_URL") == "" || c.HAToken == "" {
 		return Config{}, errors.New("outside Supervisor, HA_URL and HA_TOKEN are required")
 	}
-	c.HAURL, err = websocketURL(getenv("HA_URL"))
+	c.HAURL, err = ha.WebsocketURL(getenv("HA_URL"))
 	if err != nil {
 		return Config{}, err
 	}
 	return c, nil
-}
-
-// websocketURL turns an HA base URL into its websocket API URL.
-// http → ws, https → wss; an empty path becomes /api/websocket.
-func websocketURL(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", fmt.Errorf("HA_URL: %w", err)
-	}
-	switch u.Scheme {
-	case "http":
-		u.Scheme = "ws"
-	case "https":
-		u.Scheme = "wss"
-	case "ws", "wss":
-	default:
-		return "", fmt.Errorf("HA_URL must start with http(s):// or ws(s)://, got %q", raw)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("HA_URL has no host: %q", raw)
-	}
-	if strings.Trim(u.Path, "/") == "" {
-		u.Path = "/api/websocket"
-	}
-	return u.String(), nil
 }
 
 // SlogLevel returns the slog level for a Config.LogLevel value.

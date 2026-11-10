@@ -292,8 +292,9 @@ func itunesArtwork(results []itunesResult) string {
 }
 
 // albumArtwork looks up an album URL's id in iTunes. Not an album URL: "".
-// (catalog.Parse would do, but it is owned by track A; the script's regex is
-// enough and also matches the album slug-less form.)
+// This is the script's regex, not catalog.Parse, on purpose: Parse rejects
+// hosts other than Apple's (the tests serve pages from httptest), and it
+// reads an album link with ?i=<song> as the song, while the art is the album's.
 func (c *Cache) albumArtwork(ctx context.Context, rawURL string) (string, error) {
 	m := albumIDPattern.FindStringSubmatch(rawURL)
 	if m == nil {

@@ -43,4 +43,7 @@ COPY --from=certs /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/nfc-player /nfc-player
 ENV ZONEINFO=/usr/share/zoneinfo
 EXPOSE 8099
+# Scratch has no curl; the binary probes its own /healthz. Supervisor uses
+# the watchdog URL in config.yaml; this is for plain docker runs.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD ["/nfc-player", "-healthcheck"]
 ENTRYPOINT ["/nfc-player"]

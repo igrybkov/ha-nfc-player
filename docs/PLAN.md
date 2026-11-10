@@ -83,6 +83,7 @@ Current Music Map (seed data for migration):
 │   │   └── pdf.go                PDF writer wrapper, fonts
 │   └── web/                      HTTP server, JSON API, Ingress handling
 │       └── ui/                   embedded static UI (HTML, CSS, vanilla JS)
+├── examples/                     seed tags.yaml and settings.yaml from section 1
 ├── assets/fonts/                 embedded OFL fonts with Cyrillic (Noto Sans Regular/Bold)
 ├── nfc_player/                   the HA app definition
 │   ├── config.yaml
@@ -180,7 +181,7 @@ players:
   default: [sonos, music_assistant]  # try in order; first that supports the media and succeeds
   fallback: true                     # on error, try the next player in the chain
 rooms:
-  default_volume: 15
+  default_volume: 15                 # 1..100; 0 reads as unset and becomes 15
   areas:
     family_room: {volume: 30, sonos_entity: null, ma_entity: null}
     office: {volume: 15}
@@ -335,7 +336,9 @@ type Client interface {
 Implementation: one websocket connection, request ids, reconnect with backoff,
 re-subscribe after reconnect, registries cached and refreshed on
 `*_registry_updated` events. A `Fake` implementation lives in `ha/hatest`
-for tests.
+for tests, plus `hatest.Server`: an in-process websocket server backed by a
+`Fake`, for tests that run a real `WSClient` (the end-to-end test in
+`cmd/nfc-player`).
 
 ### catalog
 
@@ -442,6 +445,31 @@ func SheetMap(t Template, job Job) [][]SlotState // used, printed, free; for the
 `Canvas` wraps the PDF library: `Rect`, `Image`, `Text`, `TextWidth`,
 `SetFill`, gradients if the library supports them, else pre-composite in Go.
 
+### web
+
+```go
+type TagLister interface{ Tags(ctx context.Context) ([]ha.Tag, error) } // ha.Client satisfies it
+type Deps struct {
+    Registry    *registry.Registry
+    Settings    *config.SettingsStore
+    Templates   *config.TemplateStore   // built-ins + templates.yaml
+    Backgrounds *config.BackgroundStore // built-ins + backgrounds.yaml
+    Play        model.PlayService
+    Scans       model.ScanLog
+    Artwork     model.ArtworkSource
+    HATags      web.TagLister
+    Labels      web.Labels // optional; nil = package labels, tests pass a fake
+    Supervisor  bool       // accept only 172.30.32.2 and loopback (healthz always)
+    Logger      *slog.Logger
+}
+func New(d Deps) *Server
+func (s *Server) Handler() http.Handler
+```
+
+Handlers that call HA, play, fetch art or print run under their own
+deadline (HA 10s, play 30s, art 20s, print 90s), so the UI never hangs while
+HA is down. The HTTP server has no write timeout for that reason.
+
 ### web API (JSON, all paths relative for Ingress)
 
 | Method | Path | Purpose |
@@ -451,9 +479,9 @@ func SheetMap(t Template, job Job) [][]SlotState // used, printed, free; for the
 | PUT | `api/tags/{id}` | update |
 | DELETE | `api/tags/{id}` | delete |
 | POST | `api/tags/{id}/play` | test play: body `{area_id}` |
-| GET | `api/tags/{id}/artwork` | resolved art (cached JPEG) |
-| GET | `api/ha/tags` | HA tag registry, for linking tag IDs |
-| GET | `api/ha/areas` | areas with resolved Sonos/MA entities |
+| GET | `api/tags/{id}/artwork` | resolved art (JPEG); `?size=16..1200` thumbnail, `?refresh=1` re-resolve |
+| GET | `api/ha/tags` | HA tag registry with the entry each resolves to, for linking tag IDs |
+| GET | `api/ha/areas` | areas with resolved Sonos/MA entities and volume |
 | GET | `api/scans` | last 50 scans: time, tag, area, matched entry, result |
 | GET/PUT | `api/settings` | settings |
 | GET/POST | `api/templates` | list / create |
@@ -461,9 +489,16 @@ func SheetMap(t Template, job Job) [][]SlotState // used, printed, free; for the
 | GET/POST | `api/backgrounds` | list / create |
 | PUT/DELETE | `api/backgrounds/{id}` | update / delete (user only) |
 | GET | `api/layouts` | registered layouts |
-| POST | `api/print/preview` | `{job}` → sheet map JSON |
-| POST | `api/print/pdf` | `{job}` → `application/pdf` |
+| POST | `api/print/preview` | print body → sheet map JSON `{cols, rows, labels, pages}` |
+| POST | `api/print/pdf` | print body → `application/pdf`; also a form post with the JSON in field `job` |
+| PUT | `api/print/offsets/{template}` | save `{x, y}` mm for a template into settings |
 | GET | `healthz` | liveness |
+
+Print body: `{entry_ids, sample, template_id, template, background_id,
+copies, start_row, start_col, skip, offset, outline}`. The server fills
+template, background, saved offset and inset/bleed from storage; `template`
+(an unsaved template) wins over `template_id`, `offset: null` means the saved
+offset, `sample` adds placeholder labels without art, and `outline` skips art.
 
 Ingress: the UI uses relative URLs only. Honor `X-Ingress-Path` for any
 absolute link. Accept connections only from `172.30.32.2` when running under

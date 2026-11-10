@@ -4,14 +4,14 @@ import { h, get, post, put, del, toast, run, field, num, readNum, select, confir
 
 export async function render(view, rest, params) {
   const templates = await get('api/templates');
-  if (rest[0] === 'edit' && rest[1]) return editor(view, templates, templates.find((t) => t.id === rest[1]), false);
+  if (rest[0] === 'edit' && rest[1]) return editor(view, templates.find((t) => t.id === rest[1]), false);
   if (rest[0] === 'new') {
     const from = templates.find((t) => t.id === params.get('from')) || templates[0];
     const copy = structuredClone(from);
     copy.id = '';
     copy.name = `${from.name} (copy)`;
     copy.builtin = false;
-    return editor(view, templates, copy, true);
+    return editor(view, copy, true);
   }
   view.replaceChildren(
     h('div', { class: 'toolbar' }, h('h1', { text: 'Templates' }),
@@ -77,7 +77,7 @@ function outline(t) {
   return root;
 }
 
-async function editor(view, templates, tpl, isNew) {
+async function editor(view, tpl, isNew) {
   if (!tpl) {
     view.replaceChildren(h('p', { class: 'error', text: 'No such template.' }), h('a', { href: '#/templates', text: 'Back' }));
     return;

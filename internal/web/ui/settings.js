@@ -47,7 +47,8 @@ export async function render(view) {
   drawChain();
 
   const fallback = h('input', { type: 'checkbox', checked: s.players.fallback });
-  const defaultVolume = num(s.rooms.default_volume, { min: 0, max: 100, step: 1 });
+  // 0 in settings.yaml reads as unset and becomes 15, so the minimum is 1.
+  const defaultVolume = num(s.rooms.default_volume, { min: 1, max: 100, step: 1 });
   const sonosPref = h('input', { value: s.rooms.sonos_model_preference.join(', ') });
   const integrations = h('input', { value: s.readers.integrations.join(', ') });
   const maEntry = h('input', { value: s.music_assistant.config_entry_id ?? '', placeholder: 'auto-detect' });
@@ -93,7 +94,7 @@ export async function render(view) {
   } },
   h('div', { class: 'toolbar' }, h('h1', { text: 'Settings' })),
   h('fieldset', {}, h('legend', { text: 'Areas' }),
-    field('Default volume %', defaultVolume),
+    field('Default volume %', defaultVolume, '1 to 100. Used in areas with no volume of their own.'),
     h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Area', 'Volume %', 'Sonos entity', 'Music Assistant entity'].map((c) => h('th', { text: c })))),
       h('tbody', {}, areaRows.length ? areaRows.map((r) => r.tr) : h('tr', {}, h('td', { colspan: 4, class: 'muted', text: 'No areas.' }))))),

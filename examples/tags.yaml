@@ -1,0 +1,88 @@
+# Seed tag registry: the Music Map of automation 1709949609238.
+# Copy to <config_dir>/tags.yaml (default /homeassistant/nfc_player/).
+version: 1
+tags:
+  - id: metallica-essential
+    name: Metallica — Essential
+    tag_ids: []
+    url: https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5
+    shuffle: true
+    repeat: all
+    volume: null
+    player: null
+    label:
+      title: null
+      subtitle: null
+      artwork: null
+  - id: disturbed-divisible
+    name: Disturbed — Divisible
+    tag_ids: []
+    url: https://music.apple.com/us/album/divisive/1646032515
+    shuffle: false
+    repeat: all
+    volume: null
+    player: null
+    label:
+      title: null
+      subtitle: null
+      artwork: null
+  - id: creedence-clearwater-revival-essential
+    name: Creedence Clearwater Revival — Essential
+    tag_ids: []
+    url: https://music.apple.com/us/playlist/creedence-clearwater-revival-essentials/pl.a64e22c649a64385b037a8f1a1559cb1
+    shuffle: true
+    repeat: all
+    volume: null
+    player: null
+    label:
+      title: null
+      subtitle: null
+      artwork: null
+  - id: queen-bohemian-rhapsody-the-original-soundtrack
+    name: Queen — Bohemian Rhapsody (The Original Soundtrack)
+    tag_ids: []
+    url: https://music.apple.com/us/album/bohemian-rhapsody-the-original-soundtrack/6781027361
+    shuffle: false
+    repeat: all
+    volume: null
+    player: null
+    label:
+      title: null
+      subtitle: null
+      artwork: null
+  - id: volodymyr-ivasiuk
+    name: Volodymyr Ivasiuk
+    tag_ids: []
+    url: https://music.apple.com/us/artist/%D0%B2%D0%BE%D0%BB%D0%BE%D0%B4%D0%B8%D0%BC%D0%B8%D1%80-%D1%96%D0%B2%D0%B0%D1%81%D1%8E%D0%BA/1797008889
+    shuffle: true
+    repeat: all
+    volume: null
+    player: null
+    label:
+      title: null
+      subtitle: null
+      artwork: null
+  - id: ray-charles-the-ultimate-collection
+    name: Ray Charles — The Ultimate Collection
+    tag_ids: []
+    url: https://music.apple.com/us/album/the-atlantic-hits/1544753335
+    shuffle: true
+    repeat: all
+    volume: null
+    player: null
+    label:
+      title: null
+      subtitle: null
+      artwork: null
+  - id: kenny-rogers-21-number-ones
+    name: Kenny Rogers — 21 Number Ones
+    tag_ids: []
+    url: https://music.apple.com/us/playlist/kenny-rogers-essentials/pl.97c239b65c7e4e3eb786f27c74790b8b
+    shuffle: true
+    repeat: all
+    volume: null
+    player: null
+    label:
+      title: null
+      subtitle: null
+      artwork: null

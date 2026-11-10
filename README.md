@@ -37,6 +37,7 @@ You need Go (see `go.mod`) and Docker with buildx.
 ```sh
 make build     # static binary ./nfc-player
 make test      # go test -race ./...
+make test-ui   # node --test for the UI helpers
 make vet       # go vet ./...
 make lint      # staticcheck
 make docker    # multi-arch image build (no push)
@@ -55,7 +56,13 @@ Data goes to `./data` and config files to `./dev-config`. The UI is at
 <http://localhost:8099>. Set `LISTEN` to change the address.
 
 `make docker` needs a buildx builder that supports multi-platform builds
-(the `docker-container` driver, or the containerd image store).
+(the `docker-container` driver, or the containerd image store). Pick one
+with `make docker BUILDER=<name>`.
+
+`nfc-player -healthcheck` exits 0 when the local server answers `/healthz`.
+The image uses it as its Docker health check.
+
+Seed files for the migration from the old automation are in `examples/`.
 
 ## Extend
 

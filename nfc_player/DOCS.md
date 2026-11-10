@@ -7,18 +7,29 @@ them.
 ## How it works
 
 1. Home Assistant fires a `tag_scanned` event when a tag reader sees a tag.
-2. The app finds the tag in its registry. It matches by tag ID first, then by
-   tag name.
-3. It finds the speaker in the reader's area and plays the music there.
+   Only readers of the integrations in **Settings → Readers** count
+   (ESPHome by default).
+2. The app finds the tag in its registry. It matches by linked tag ID first,
+   then by tag name. The name is cut at the first `|` and compared without
+   case, so `Metallica — Essential | v2` finds `Metallica — Essential`.
+3. A name like `Artist — Album` with no entry is searched in Music Assistant,
+   and the first Apple Music album or playlist plays.
+4. It finds the speaker in the reader's area and plays the music there.
    Sonos speakers play natively. Music Assistant is the fallback.
+5. Volume: the tag's volume, else the area's, else the default volume.
 
 ## Setup
 
 1. Install the app and start it.
 2. Open **NFC Player** in the sidebar.
-3. Add a tag: paste an Apple Music link and pick the tag from the list of
-   tags Home Assistant knows.
-4. Open **Settings** in the app to set rooms, volumes and print offsets.
+3. Add a tag: **Tags → New tag**. Use the tag's name as Home Assistant
+   knows it and paste an Apple Music link. You can also link tag IDs from
+   the list of tags Home Assistant knows.
+4. Open **Settings** in the app to set area volumes, players and readers.
+
+Coming from the old "Play Music when NFC tag is scanned" automation? Copy
+`examples/tags.yaml` and `examples/settings.yaml` from the repository into
+`config_dir`. They hold the old Music Map and room volumes.
 
 ## Options
 
@@ -41,10 +52,28 @@ changes on disk.
 
 Downloaded cover art is cached in the app's `/data` folder.
 
+## Screens
+
+- **Tags**: the registry. Search, edit, link tag IDs, preview art and test
+  play in an area.
+- **Unknown scans**: recent scans that matched nothing, with **Create entry**.
+  **All recent scans** below it shows every scan with its result and error.
+- **Print**: make a label PDF (see below).
+- **Templates** and **Backgrounds**: the built-ins are read-only. Duplicate
+  one to make your own.
+- **Settings**: default volume (1 to 100), per-area volume (0 to 100), Sonos
+  and Music Assistant entity per area, player order and fallback, reader
+  integrations, print inset and bleed.
+
 ## Labels
 
-Pick tags, a template and a start position on the sheet. The app makes a PDF
-to print. Use the print offsets in settings if your printer shifts the page.
+On **Print**, pick tags, copies, a template and a background. Click a slot
+on the sheet to start there; used slots stay empty. **Generate PDF** opens
+the PDF; print it at 100% (no scaling).
+
+If your printer shifts the page, set the offset in mm and press **Save
+offsets**. It is saved per template. Positive X moves the print right,
+positive Y moves it up.
 
 ## Support
 
