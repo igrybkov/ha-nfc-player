@@ -83,20 +83,15 @@ Built-ins live in `internal/labels/builtin/backgrounds.yaml`.
 2. Commit and push to `main`. Wait for CI to pass.
 3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
-The release workflow checks that the tag matches `version`. Then it pushes:
-
-- `ghcr.io/igrybkov/ha-nfc-player:X.Y.Z` and `:latest` (multi-arch). The app
-  uses this one.
-- `ghcr.io/igrybkov/amd64-ha-nfc-player:X.Y.Z` and
-  `ghcr.io/igrybkov/aarch64-ha-nfc-player:X.Y.Z`, a fallback in case
-  Supervisor needs the `{arch}` image form.
+The release workflow checks that the tag matches `version`. Then it pushes
+one multi-arch image (`linux/amd64`, `linux/arm64`):
+`ghcr.io/igrybkov/ha-nfc-player:X.Y.Z` and `:latest`.
 
 It also creates a GitHub release with the notes from the changelog.
 
-**First release only.** GHCR may create the packages as private. Open each
-package on GitHub (Packages → package → Package settings → Change
-visibility) and make it public. There are three packages: `ha-nfc-player`,
-`amd64-ha-nfc-player` and `aarch64-ha-nfc-player`. Check with a logged-out
+**First release only.** GHCR may create the package as private. Open it on
+GitHub (Packages → ha-nfc-player → Package settings → Change visibility)
+and make it public. Check with a logged-out
 `docker pull ghcr.io/igrybkov/ha-nfc-player:X.Y.Z`.
 
 ## License

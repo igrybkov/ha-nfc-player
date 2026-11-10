@@ -574,10 +574,8 @@ schema:
 ```
 
 `image` is one multi-arch manifest. Supervisor pulls `image:version`, and
-Docker picks the matching platform. If Supervisor turns out to need the
-`{arch}` form, the release workflow also pushes
-`ghcr.io/igrybkov/{arch}-ha-nfc-player` tags (amd64, aarch64) as a fallback.
-Decide after the first real install; implement both pushes from the start.
+Docker picks the matching platform. Only the multi-arch image is published;
+no per-arch images.
 
 `release.yaml`: on tag `v*`. Check that the tag equals `version` in
 `nfc_player/config.yaml`. Set up QEMU is **not** needed (Go cross-compiles).

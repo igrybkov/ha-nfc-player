@@ -13,7 +13,6 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/igrybkov/ha-nfc-player
-  ARCH_IMAGE: ghcr.io/igrybkov/{arch}-ha-nfc-player
   SOURCE_URL: https://github.com/igrybkov/ha-nfc-player
 
 jobs:
@@ -71,24 +70,6 @@ jobs:
             index:org.opencontainers.image.version=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # Fallback for Supervisor versions that want image: ghcr.io/igrybkov/{arch}-ha-nfc-player.
-      # Copies each platform out of the multi-arch index; no rebuild.
-      - name: Push per-arch tags
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          for pair in amd64:amd64 aarch64:arm64; do
-            hass_arch="${pair%%:*}"
-            platform="linux/${pair##*:}"
-            target="${ARCH_IMAGE/\{arch\}/$hass_arch}"
-            docker buildx imagetools create \
-              --platform "$platform" \
-              --annotation "index:org.opencontainers.image.source=$SOURCE_URL" \
-              -t "$target:$VERSION" -t "$target:latest" \
-              "$IMAGE:$VERSION"
-            docker buildx imagetools inspect "$target:$VERSION"
-          done
 
   github-release:
     needs: image
