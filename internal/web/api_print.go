@@ -183,6 +183,8 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 		return job, nil, badRequest("start_row must be 1..%d", g.Rows)
 	case job.StartCol > g.Cols:
 		return job, nil, badRequest("start_col must be 1..%d", g.Cols)
+	case (job.StartRow-1)*g.Cols+job.StartCol-1+job.Skip >= g.Cols*g.Rows:
+		return job, nil, badRequest("start slot plus skip leaves no free slot on the first sheet")
 	case (len(entries)+req.Sample)*job.Copies > maxLabels:
 		return job, nil, badRequest("at most %d labels per job", maxLabels)
 	case len(entries)+req.Sample == 0:
@@ -204,21 +206,14 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 
 // items builds the labels: entries first, then sample placeholders. art is
 // parallel to entries and may be nil.
-func (s *Server) items(entries []model.Entry, sample int, art []image.Image) []labels.Item {
+func (*Server) items(entries []model.Entry, sample int, art []image.Image) []labels.Item {
 	out := make([]labels.Item, 0, len(entries)+sample)
 	for i, e := range entries {
-		title, subtitle := s.lbl.TitleSubtitle(e.Name)
-		if e.Label.Title != nil {
-			title = *e.Label.Title
-		}
-		if e.Label.Subtitle != nil {
-			subtitle = *e.Label.Subtitle
-		}
-		it := labels.Item{Title: title, Subtitle: subtitle}
+		var img image.Image
 		if i < len(art) {
-			it.Art = art[i]
+			img = art[i]
 		}
-		out = append(out, it)
+		out = append(out, labels.ItemFromEntry(e, img))
 	}
 	for range sample {
 		out = append(out, labels.Item{Title: "Artist", Subtitle: "Album title"})

@@ -8,7 +8,7 @@ export async function render(view, rest, params) {
     const from = all.find((b) => b.id === params.get('from'));
     const b = from
       ? { ...structuredClone(from), id: '', name: `${from.name} (copy)`, builtin: false }
-      : { id: '', name: '', builtin: false, background: '#1E3A5F', text: '#FFFFFF', fade: null };
+      : { id: '', name: '', builtin: false, background: '#1E3A5F', text: '#FFFFFF', fade: null, fade_text: null };
     return editor(view, b, true);
   }
   view.replaceChildren(
@@ -26,11 +26,12 @@ export async function render(view, rest, params) {
 
 // sample draws a label mock-up: art area, then the fade into the background
 // under the text, like the "full" layout.
+// The text sits over the fade, so it uses fade_text (white when unset).
 function sample(b, small) {
   const fade = b.fade || b.background;
   return h('div', {
     class: `bg-sample${small ? ' small' : ''}`,
-    style: `--s-bg:${b.background};--s-fg:${b.text};--s-fade:${fade}`,
+    style: `--s-bg:${b.background};--s-fg:${b.fade_text || '#FFFFFF'};--s-fade:${fade}`,
   }, h('div', { class: 'bg-art' }), h('div', { class: 'bg-text' }, h('b', { text: 'Artist' }), h('span', { text: 'Album title' })));
 }
 
@@ -45,8 +46,8 @@ function editor(view, b, isNew) {
 
   const name = h('input', { value: b.name, required: true, disabled: ro });
   name.addEventListener('input', () => { b.name = name.value; });
-  const color = (key) => {
-    const input = h('input', { type: 'color', value: (b[key] || b.background).toLowerCase(), disabled: ro });
+  const color = (key, fallback = b.background) => {
+    const input = h('input', { type: 'color', value: (b[key] || fallback).toLowerCase(), disabled: ro });
     input.addEventListener('input', () => { b[key] = input.value.toUpperCase(); redraw(); });
     return input;
   };
@@ -62,6 +63,16 @@ function editor(view, b, isNew) {
   sameFade.addEventListener('change', syncFade);
   bg.addEventListener('input', () => { if (sameFade.checked) fade.value = bg.value; });
   fade.disabled = ro || sameFade.checked;
+
+  // Text on the fade (full layout); null means white.
+  const fadeText = color('fade_text', '#FFFFFF');
+  const whiteFadeText = h('input', { type: 'checkbox', checked: b.fade_text == null, disabled: ro });
+  whiteFadeText.addEventListener('change', () => {
+    fadeText.disabled = ro || whiteFadeText.checked;
+    b.fade_text = whiteFadeText.checked ? null : fadeText.value.toUpperCase();
+    redraw();
+  });
+  fadeText.disabled = ro || whiteFadeText.checked;
 
   const save = h('button', { type: 'submit', class: 'primary', text: isNew ? 'Create' : 'Save', disabled: ro });
   view.replaceChildren(h('form', { class: 'editor', onsubmit: (ev) => {
@@ -80,8 +91,11 @@ function editor(view, b, isNew) {
   h('div', { class: 'cols' },
     h('div', { class: 'stack' },
       field('Name', name),
-      h('div', { class: 'grid3' }, field('Background', bg), field('Text', fg), field('Fade', fade)),
-      h('label', { class: 'check' }, sameFade, ' Fade uses the background color'),
+      h('div', { class: 'grid2' }, field('Background', bg), field('Text', fg)),
+      h('fieldset', {}, h('legend', { text: 'Full layout (optional)' }),
+        h('div', { class: 'grid2' }, field('Fade', fade), field('Text on fade (full layout)', fadeText)),
+        h('label', { class: 'check' }, sameFade, ' Fade uses the background color'),
+        h('label', { class: 'check' }, whiteFadeText, ' White text on fade')),
       h('p', { class: 'muted small', text: 'Non-white backgrounds bleed past the label edge when printed.' })),
     preview),
   h('div', { class: 'actions' },

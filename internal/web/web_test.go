@@ -143,11 +143,6 @@ func (f *fakeLabels) SheetMap(t labels.Template, job labels.Job) [][]labels.Slot
 
 func (f *fakeLabels) Layouts() []labels.Layout { return []labels.Layout{fakeLayout{}} }
 
-func (f *fakeLabels) TitleSubtitle(name string) (string, string) {
-	a, b, _ := strings.Cut(name, "—")
-	return strings.TrimSpace(a), strings.TrimSpace(b)
-}
-
 func (f *fakeLabels) ValidateTemplate(t labels.Template) error {
 	if t.ID == "" {
 		return errors.New("id is required")
@@ -533,10 +528,10 @@ func TestBackgrounds(t *testing.T) {
 	if list := decode[[]labels.Background](t, w); len(list) != 2 {
 		t.Fatalf("list %+v", list)
 	}
-	w = e.do(t, "POST", "/api/backgrounds", labels.Background{Name: "Navy", Background: "#000080", Text: "#FFFFFF"})
+	w = e.do(t, "POST", "/api/backgrounds", map[string]any{"name": "Navy", "background": "#000080", "text": "#FFFFFF", "fade": nil, "fade_text": "#FFEE00"})
 	wantStatus(t, w, http.StatusCreated)
 	b := decode[labels.Background](t, w)
-	if b.ID != "navy" {
+	if b.ID != "navy" || b.Fade != nil || b.FadeText == nil || *b.FadeText != "#FFEE00" {
 		t.Fatalf("created %+v", b)
 	}
 	wantJSONError(t, e.do(t, "POST", "/api/backgrounds", labels.Background{Name: "Bad", Background: "blue", Text: "#FFFFFF"}), http.StatusBadRequest)
@@ -596,6 +591,7 @@ func TestPrintPreview(t *testing.T) {
 		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", StartCol: 3},
 		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", Copies: 101},
 		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", Skip: -1},
+		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", StartRow: 5, StartCol: 2, Skip: 1},
 		{Sample: maxSample + 1, TemplateID: "avery-5434"},
 	}
 	for i, req := range bad {
@@ -724,7 +720,10 @@ func TestSupervisorClientFilter(t *testing.T) {
 			t.Errorf("%s: status %d, want %d", addr, w.Code, want)
 		}
 	}
-	wantStatus(t, e.do(t, "GET", "/healthz", nil, remote("192.168.1.10:1")), http.StatusOK)
+	// Supervisor's watchdog calls /healthz directly, from its own address.
+	for _, addr := range []string{"192.168.1.10:1", "172.30.32.1:1"} {
+		wantStatus(t, e.do(t, "GET", "/healthz", nil, remote(addr)), http.StatusOK)
+	}
 
 	// Outside Supervisor (dev mode) any client is accepted.
 	dev := newEnv(t, false)

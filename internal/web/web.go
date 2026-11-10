@@ -30,7 +30,6 @@ type Labels interface {
 	Render(w io.Writer, job labels.Job) error
 	SheetMap(t labels.Template, job labels.Job) [][]labels.SlotState
 	Layouts() []labels.Layout
-	TitleSubtitle(name string) (title, subtitle string)
 	ValidateTemplate(t labels.Template) error
 }
 
@@ -179,6 +178,5 @@ func (labelsPkg) Render(w io.Writer, job labels.Job) error { return labels.Rende
 func (labelsPkg) SheetMap(t labels.Template, job labels.Job) [][]labels.SlotState {
 	return labels.SheetMap(t, job)
 }
-func (labelsPkg) Layouts() []labels.Layout                   { return labels.Layouts() }
-func (labelsPkg) TitleSubtitle(name string) (string, string) { return labels.TitleSubtitle(name) }
-func (labelsPkg) ValidateTemplate(t labels.Template) error   { return t.Validate() }
+func (labelsPkg) Layouts() []labels.Layout                 { return labels.Layouts() }
+func (labelsPkg) ValidateTemplate(t labels.Template) error { return t.Validate() }
