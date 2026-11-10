@@ -1,0 +1,16 @@
+# Binaries
+/nfc-player
+/bin/
+/dist/
+
+# Local env and secrets
+.env*
+
+# Generated PDFs, except test fixtures
+*.pdf
+!**/testdata/**/*.pdf
+
+# Scratch and local data dirs (make run-dev)
+/tmp/
+/data/
+/dev-config/

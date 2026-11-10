@@ -373,8 +373,18 @@ type Player interface {
     Play(ctx context.Context, req Request) error
 }
 type Router struct{ /* ordered players, fallback flag */ }
-func (r *Router) Play(ctx context.Context, req Request, override string) error
+func NewRouter(settings model.SettingsSource, searcher Searcher, players ...Player) *Router
+func (r *Router) Play(ctx context.Context, req Request, override string) (player string, err error)
+type Searcher interface{ Search(ctx context.Context, area rooms.Area, q Query) (catalog.Media, error) }
+var ErrNoPlayer error
 ```
+
+Phase 0 amendments (authoritative, the code is the source of truth):
+`labels.Job.Offset` is `model.Offset`. `model.NormalizeName` is the one name
+key used by scan and registry. Missing `repeat` defaults to `all` and nil
+`TagIDs` to `[]`, applied by the registry on load. Built-in templates and
+backgrounds are in `internal/labels/builtin/*.yaml`. Layouts register in
+`init` in `labels/layouts`; `labels` must not import `layouts`.
 
 Adding a player means one new package that implements `Player` and one line in
 `main.go` to register it.

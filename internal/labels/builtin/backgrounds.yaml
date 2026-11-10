@@ -1,0 +1,12 @@
+- id: white
+  name: White
+  builtin: true
+  background: "#FFFFFF"
+  text: "#000000"
+  fade: null
+- id: black
+  name: Black
+  builtin: true
+  background: "#000000"
+  text: "#FFFFFF"
+  fade: null
