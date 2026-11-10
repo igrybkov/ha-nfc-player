@@ -644,9 +644,11 @@ Compare boxes, not text (fonts differ). Build the image for both platforms,
 measure image size and idle RSS. No live HA access in this phase.
 
 Phase 3: review (separate agent), fix findings, tag `v0.1.0`, release.
-GHCR packages start private. After the first push, the package visibility
-must be set to public once (by the user, or `gh api` if allowed). Verify an
-anonymous `docker pull` before calling the release done.
+The image must be public. The release workflow sets the
+`org.opencontainers.image.source` label to the repo URL so the package links
+to this public repo. If the first push still lands private, the user flips it
+to public once in the package settings (GitHub has no API for this). Verify
+an anonymous `docker pull` (logged out) before calling the release done.
 
 ## 11. Cutover (done with the user, not by agents)
 
