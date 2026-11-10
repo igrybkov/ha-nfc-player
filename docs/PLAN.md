@@ -236,7 +236,8 @@ built-in and edit the copy. Validation: grid must fit the page, all sizes > 0,
   builtin: true
   background: "#FFFFFF"
   text: "#000000"
-  fade: null           # full layout: gradient color under text; null = background
+  fade: "#000000"      # full layout: gradient color under text; null = #000000
+  fade_text: "#FFFFFF" # full layout: text over the fade; null = #FFFFFF
 - id: black
   name: Black
   builtin: true
@@ -479,7 +480,7 @@ Follows HA light/dark via `prefers-color-scheme`. Screens:
    "Save offsets" stores them for the template.
 4. **Templates.** List built-ins and user templates. Create, duplicate, edit,
    delete user ones. Live outline preview (`api/print/pdf` with `outline`).
-5. **Backgrounds.** Same pattern: color pickers for background, text, fade.
+5. **Backgrounds.** Same pattern: color pickers for background, text, fade, text on fade.
 6. **Settings.** Areas table (volume, Sonos/MA entity override), player chain
    order, fallback switch, reader integrations, print inset/bleed values.
 
@@ -497,7 +498,7 @@ Port these rules exactly. The Python script is the reference; copy it into
 - `side` layout: square art flush left (inside inset), text block vertically
   centered to the right. Title bold, subtitle regular. Wrap to lines, shrink
   font in steps, ellipsize any line still too wide.
-- `full` layout: art fills the label, gradient fade to the background color
+- `full` layout: art fills the label, gradient fade to the `fade` color (default black, as in the script)
   under white or text-colored lines at the bottom. Composite the gradient in
   Go (no alpha bands).
 - Non-white backgrounds: fill extends `bleed` past the label left, right and

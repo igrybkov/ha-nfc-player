@@ -1,12 +1,46 @@
 // Package labels renders label sheets to PDF: templates, backgrounds,
 // pluggable layouts, slot math and the PDF canvas.
 //
-// Owner: track B (docs/PLAN.md section 10). Layouts live in labels/layouts and
-// register themselves in init; import that package for its side effect.
+// Owner: track B (docs/PLAN.md section 10). The geometry is a port of
+// docs/reference/nfc-music-labels.py, which was tuned against real paper.
+//
+// # Coordinates
+//
+// Everything a layout sees is in points (1 in = 72 pt), origin at the top-left
+// of the page, Y down. Render computes each slot, fills the bleed for non-white
+// backgrounds, clips to the slot shrunk by the inset (rounded corners), and
+// calls the layout with that inset rect as cell. A layout never needs to know
+// about offsets, bleed or clipping.
+//
+// # Adding a layout
+//
+// Add one file to internal/labels/layouts:
+//
+//	package layouts
+//
+//	import "github.com/igrybkov/ha-nfc-player/internal/labels"
+//
+//	func init() { labels.RegisterLayout(myLayout{}) }
+//
+//	type myLayout struct{}
+//
+//	func (myLayout) ID() string   { return "my-layout" } // used in templates
+//	func (myLayout) Name() string { return "My layout" } // shown in the UI
+//	func (myLayout) Draw(c labels.Canvas, cell labels.Rect, item labels.Item, bg labels.Background, t labels.Template) error {
+//		...
+//	}
+//
+// Helpers for layouts: FitTextBlock (wrap, shrink and ellipsize title and
+// subtitle, then draw them bottom-aligned), CropToRatio, ResizeArt and
+// ArtPixels (art at ArtDPI), FadeBottom (gradient composited into the art),
+// and LabelPad. The labels package must not import layouts; the binary
+// blank-imports it.
 package labels
 
 import (
 	_ "embed"
+	"errors"
+	"fmt"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -67,6 +101,93 @@ func BuiltinTemplates() ([]Template, error) {
 	return ts, nil
 }
 
+// PerSheet is the number of label slots on one page.
+func (t Template) PerSheet() int { return t.Grid.Cols * t.Grid.Rows }
+
+// fitTolerance absorbs float error when a grid exactly fills the page.
+const fitTolerance = 1e-9
+
 // Validate checks sizes, that the grid fits the page and that the layout is
-// registered. Uniqueness of ids is checked by the caller.
-func (t Template) Validate() error { panic("TODO: track B") }
+// registered. Uniqueness of ids is checked by ValidateTemplates.
+func (t Template) Validate() error {
+	var errs []error
+	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+	if t.ID == "" {
+		add("id is required")
+	}
+	positive := []struct {
+		name string
+		v    float64
+	}{
+		{"page.width_in", t.Page.WidthIn},
+		{"page.height_in", t.Page.HeightIn},
+		{"label.width_in", t.Label.WidthIn},
+		{"label.height_in", t.Label.HeightIn},
+		{"grid.cols", float64(t.Grid.Cols)},
+		{"grid.rows", float64(t.Grid.Rows)},
+		{"font.title_pt", t.Font.TitlePt},
+		{"font.subtitle_pt", t.Font.SubtitlePt},
+	}
+	for _, p := range positive {
+		if !(p.v > 0) { // also catches NaN
+			add("%s must be > 0", p.name)
+		}
+	}
+	nonNegative := []struct {
+		name string
+		v    float64
+	}{
+		{"margin.left_in", t.Margin.LeftIn},
+		{"margin.top_in", t.Margin.TopIn},
+		{"gap.col_in", t.Gap.ColIn},
+		{"gap.row_in", t.Gap.RowIn},
+	}
+	for _, p := range nonNegative {
+		if !(p.v >= 0) {
+			add("%s must be >= 0", p.name)
+		}
+	}
+	if len(errs) == 0 { // the fit check only makes sense with sane sizes
+		if w := t.gridWidthIn(); w > t.Page.WidthIn+fitTolerance {
+			add("grid is %.4g in wide with the left margin; page is %.4g in", w, t.Page.WidthIn)
+		}
+		if h := t.gridHeightIn(); h > t.Page.HeightIn+fitTolerance {
+			add("grid is %.4g in tall with the top margin; page is %.4g in", h, t.Page.HeightIn)
+		}
+	}
+	if _, ok := LookupLayout(t.Layout); !ok {
+		add("layout %q is not registered", t.Layout)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("template %q: %w", t.ID, err)
+	}
+	return nil
+}
+
+func (t Template) gridWidthIn() float64 {
+	n := float64(t.Grid.Cols)
+	return t.Margin.LeftIn + n*t.Label.WidthIn + (n-1)*t.Gap.ColIn
+}
+
+func (t Template) gridHeightIn() float64 {
+	n := float64(t.Grid.Rows)
+	return t.Margin.TopIn + n*t.Label.HeightIn + (n-1)*t.Gap.RowIn
+}
+
+// ValidateTemplates validates each template and checks that ids are unique.
+// Pass built-ins and user templates together, so a user id can't shadow a
+// built-in.
+func ValidateTemplates(ts []Template) error {
+	seen := map[string]bool{}
+	var errs []error
+	for _, t := range ts {
+		if err := t.Validate(); err != nil {
+			errs = append(errs, err)
+		}
+		if seen[t.ID] {
+			errs = append(errs, fmt.Errorf("template %q: duplicate id", t.ID))
+		}
+		seen[t.ID] = true
+	}
+	return errors.Join(errs...)
+}

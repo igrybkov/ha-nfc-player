@@ -3,10 +3,12 @@
   builtin: true
   background: "#FFFFFF"
   text: "#000000"
-  fade: null
+  fade: "#000000"
+  fade_text: "#FFFFFF"
 - id: black
   name: Black
   builtin: true
   background: "#000000"
   text: "#FFFFFF"
-  fade: null
+  fade: "#000000"
+  fade_text: "#FFFFFF"

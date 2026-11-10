@@ -1,41 +1,227 @@
 package labels
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"io"
+	"math"
 
 	"github.com/signintech/gopdf"
+
+	"github.com/igrybkov/ha-nfc-player/assets"
 )
 
-// Render writes the job as a PDF to w.
-func Render(w io.Writer, job Job) error { panic("TODO: track B") }
+// Geometry from the script.
+const (
+	cornerRadiusPt   = 0.04 * PointsPerInch // inset clip and outline corners
+	outlineWidthPt   = 0.3
+	cornerArcPoints  = 8  // polygon points per rounded corner
+	artJPEGQuality   = 90 // art is DCT-passed into the PDF; PNG at 600 dpi is huge
+	fontRegularAlias = "regular"
+	fontBoldAlias    = "bold"
+)
+
+var outlineGray = color.RGBA{153, 153, 153, 0xFF} // script: Color(0.6, 0.6, 0.6)
+
+// Render writes the job as a PDF to w. It validates the template, the
+// background and the job first. Each label is drawn by the template's layout
+// inside the slot shrunk by InsetMM, clipped to a rounded rect. Non-white
+// backgrounds bleed BleedMM past the label left, right and top; downward only
+// when the slot below is printed in this job or the label is in the last row,
+// else EdgeBleedMM. Outline adds a gray outline on every slot of every page,
+// so an outline job with no items prints one page of outlines.
+func Render(w io.Writer, job Job) error {
+	t := job.Template
+	if err := t.Validate(); err != nil {
+		return err
+	}
+	if err := job.Background.Validate(); err != nil {
+		return err
+	}
+	if err := job.validate(t); err != nil {
+		return fmt.Errorf("print job: %w", err)
+	}
+	inset := job.InsetMM * PointsPerMM
+	if 2*inset >= t.Label.WidthIn*PointsPerInch || 2*inset >= t.Label.HeightIn*PointsPerInch {
+		return fmt.Errorf("print job: inset %.2g mm leaves no room on a %gx%g in label", job.InsetMM, t.Label.WidthIn, t.Label.HeightIn)
+	}
+	layout, _ := LookupLayout(t.Layout) // Validate checked it exists
+
+	c, err := newPDFCanvas(t.Page)
+	if err != nil {
+		return err
+	}
+	bg, fg := job.Background.BackgroundColor(), job.Background.TextColor()
+	bleed := job.BleedMM * PointsPerMM
+	placements := place(t, job)
+	next := 0
+	for page := range pageCount(t, job) {
+		c.pdf.AddPage()
+		for ; next < len(placements) && placements[next].page == page; next++ {
+			p := placements[next]
+			r := slotRect(t, job.Offset, p.row, p.col)
+			if !job.Background.IsWhite() {
+				// Bleed past the edge, so printer drift leaves no white strip.
+				c.SetFill(bg)
+				c.Rect(Rect{r.X - bleed, r.Y - bleed, r.W + 2*bleed, r.H + bleed + p.bottomBleedMM*PointsPerMM})
+			}
+			cell := r.Inset(inset)
+			c.pushClip(cell)
+			c.SetTextColor(fg)
+			err := layout.Draw(c, cell, *p.item, job.Background, t)
+			c.popClip()
+			if err != nil {
+				return fmt.Errorf("label %q (page %d, row %d, column %d): %w", p.item.Title, page+1, p.row+1, p.col+1, err)
+			}
+		}
+		if job.Outline {
+			for row := range t.Grid.Rows {
+				for col := range t.Grid.Cols {
+					c.roundOutline(slotRect(t, job.Offset, row, col), outlineGray)
+				}
+			}
+		}
+	}
+	if _, err := c.pdf.WriteTo(w); err != nil {
+		return fmt.Errorf("write pdf: %w", err)
+	}
+	return nil
+}
 
 // pdfCanvas implements Canvas on gopdf. Fonts come from assets.Fonts.
 //
-// gopdf note (phase 0 smoke test): ImageFrom re-encodes to PNG. It works on an
-// *image.RGBA but failed on a decoded JPEG (*image.YCbCr, "16-bit depth not
-// supported"). Draw into *image.RGBA first, or pass JPEG bytes through
-// gopdf.ImageHolderByBytes (DCT passthrough, much smaller at 600 dpi).
-// gopdf has no gradient API; composite the fade in Go.
+// gopdf notes:
+//   - ImageFrom re-encodes to PNG and failed on a decoded JPEG (*image.YCbCr,
+//     "16-bit depth not supported"). Image encodes JPEG and passes the bytes
+//     through gopdf.ImageHolderByBytes instead (DCT passthrough, much smaller
+//     at 600 dpi). gopdf dedupes images by md5 of the bytes, so copies of a
+//     label share one image object.
+//   - Text and fills share the PDF non-stroking color, and a clip restore
+//     resets it. Rect sets the fill color again on every call.
+//   - gopdf has no gradient API; layouts composite the fade in Go.
 type pdfCanvas struct {
-	pdf *gopdf.GoPdf
+	pdf    *gopdf.GoPdf
+	fill   color.RGBA
+	family string // current font alias, for TextWidth
 }
 
 var _ Canvas = (*pdfCanvas)(nil)
 
-func (c *pdfCanvas) SetFill(col color.RGBA) { c.pdf.SetFillColor(col.R, col.G, col.B) }
+func newPDFCanvas(page Size) (*pdfCanvas, error) {
+	pdf := &gopdf.GoPdf{}
+	pdf.Start(gopdf.Config{
+		Unit:     gopdf.UnitPT,
+		PageSize: gopdf.Rect{W: page.WidthIn * PointsPerInch, H: page.HeightIn * PointsPerInch},
+	})
+	for alias, file := range map[string]string{
+		fontRegularAlias: "fonts/NotoSans-Regular.ttf",
+		fontBoldAlias:    "fonts/NotoSans-Bold.ttf",
+	} {
+		data, err := assets.Fonts.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("font %s: %w", file, err)
+		}
+		if err := pdf.AddTTFFontData(alias, data); err != nil {
+			return nil, fmt.Errorf("font %s: %w", file, err)
+		}
+	}
+	return &pdfCanvas{pdf: pdf, fill: black}, nil
+}
 
-func (c *pdfCanvas) Rect(r Rect) { c.pdf.RectFromUpperLeftWithStyle(r.X, r.Y, r.W, r.H, "F") }
+func (c *pdfCanvas) SetFill(col color.RGBA) { c.fill = col }
 
-func (c *pdfCanvas) Outline(r Rect, widthPt float64) { panic("TODO: track B") }
+func (c *pdfCanvas) Rect(r Rect) {
+	c.pdf.SetFillColor(c.fill.R, c.fill.G, c.fill.B)
+	c.pdf.RectFromUpperLeftWithStyle(r.X, r.Y, r.W, r.H, "F")
+}
 
-func (c *pdfCanvas) Image(img image.Image, r Rect) error { panic("TODO: track B") }
+// Outline strokes r with the current fill color.
+func (c *pdfCanvas) Outline(r Rect, widthPt float64) {
+	c.pdf.SetStrokeColor(c.fill.R, c.fill.G, c.fill.B)
+	c.pdf.SetLineWidth(widthPt)
+	c.pdf.RectFromUpperLeftWithStyle(r.X, r.Y, r.W, r.H, "D")
+}
+
+func (c *pdfCanvas) roundOutline(r Rect, col color.RGBA) {
+	c.pdf.SetStrokeColor(col.R, col.G, col.B)
+	c.pdf.SetLineWidth(outlineWidthPt)
+	c.pdf.Polygon(roundRectPoints(r, cornerRadiusPt), "D")
+}
+
+func (c *pdfCanvas) Image(img image.Image, r Rect) error {
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: artJPEGQuality}); err != nil {
+		return fmt.Errorf("encode art: %w", err)
+	}
+	holder, err := gopdf.ImageHolderByBytes(buf.Bytes())
+	if err != nil {
+		return err
+	}
+	return c.pdf.ImageByHolder(holder, r.X, r.Y, &gopdf.Rect{W: r.W, H: r.H})
+}
 
 func (c *pdfCanvas) SetTextColor(col color.RGBA) { c.pdf.SetTextColor(col.R, col.G, col.B) }
 
-func (c *pdfCanvas) SetFont(style FontStyle, sizePt float64) error { panic("TODO: track B") }
+func (c *pdfCanvas) SetFont(style FontStyle, sizePt float64) error {
+	family := fontRegularAlias
+	if style == Bold {
+		family = fontBoldAlias
+	}
+	if !(sizePt > 0) {
+		return fmt.Errorf("font size %g must be > 0", sizePt)
+	}
+	if err := c.pdf.SetFontWithStyle(family, gopdf.Regular, sizePt); err != nil {
+		return err
+	}
+	c.family = family
+	return nil
+}
 
-func (c *pdfCanvas) Text(x, baselineY float64, s string) error { panic("TODO: track B") }
+func (c *pdfCanvas) Text(x, baselineY float64, s string) error {
+	if c.family == "" {
+		return errNoFont
+	}
+	c.pdf.SetXY(x, baselineY)
+	return c.pdf.Text(s)
+}
 
-func (c *pdfCanvas) TextWidth(s string) (float64, error) { return c.pdf.MeasureTextWidth(s) }
+func (c *pdfCanvas) TextWidth(s string) (float64, error) {
+	if c.family == "" {
+		return 0, errNoFont
+	}
+	return c.pdf.MeasureTextWidth(s)
+}
+
+var errNoFont = errors.New("labels: SetFont must be called before drawing text")
+
+// pushClip clips drawing to r with rounded corners until popClip.
+func (c *pdfCanvas) pushClip(r Rect) {
+	c.pdf.SaveGraphicsState()
+	c.pdf.ClipPolygon(roundRectPoints(r, cornerRadiusPt))
+}
+
+func (c *pdfCanvas) popClip() { c.pdf.RestoreGraphicsState() }
+
+// roundRectPoints approximates a rounded rect with a polygon, clockwise from
+// the top-left corner (Y down).
+func roundRectPoints(r Rect, radius float64) []gopdf.Point {
+	radius = min(radius, r.W/2, r.H/2)
+	corners := []struct{ cx, cy, from float64 }{
+		{r.X + radius, r.Y + radius, math.Pi},             // top-left: 180° → 270°
+		{r.X + r.W - radius, r.Y + radius, 1.5 * math.Pi}, // top-right
+		{r.X + r.W - radius, r.Y + r.H - radius, 0},       // bottom-right
+		{r.X + radius, r.Y + r.H - radius, 0.5 * math.Pi}, // bottom-left
+	}
+	pts := make([]gopdf.Point, 0, 4*(cornerArcPoints+1))
+	for _, k := range corners {
+		for i := range cornerArcPoints + 1 {
+			a := k.from + float64(i)/cornerArcPoints*math.Pi/2
+			pts = append(pts, gopdf.Point{X: k.cx + radius*math.Cos(a), Y: k.cy + radius*math.Sin(a)})
+		}
+	}
+	return pts
+}

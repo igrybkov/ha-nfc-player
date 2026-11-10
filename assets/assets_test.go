@@ -7,7 +7,7 @@ import (
 )
 
 func TestFontsCoverCyrillic(t *testing.T) {
-	const sample = "Володимир Івасюк ґєїі ҐЄЇІ — Metallica"
+	const sample = "Володимир Івасюк ґєїі ҐЄЇІ — Metallica…"
 	for _, name := range []string{"fonts/NotoSans-Regular.ttf", "fonts/NotoSans-Bold.ttf"} {
 		data, err := Fonts.ReadFile(name)
 		if err != nil {
