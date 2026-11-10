@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/igrybkov/ha-nfc-player
+  ARCH_IMAGE: ghcr.io/igrybkov/{arch}-ha-nfc-player
+  SOURCE_URL: https://github.com/igrybkov/ha-nfc-player
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check tag matches app version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app=$(sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' nfc_player/config.yaml)
+          if [ -z "$app" ]; then
+            echo "::error::no version in nfc_player/config.yaml"
+            exit 1
+          fi
+          if [ "$tag" != "$app" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $app in nfc_player/config.yaml"
+            exit 1
+          fi
+          echo "version=$app" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          # GHCR reads the source link from the index of a multi-arch image.
+          annotations: |
+            index:org.opencontainers.image.source=${{ env.SOURCE_URL }}
+            index:org.opencontainers.image.description=Home Assistant app: play music from NFC tags and print labels for them
+            index:org.opencontainers.image.licenses=MIT
+            index:org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Fallback for Supervisor versions that want image: ghcr.io/igrybkov/{arch}-ha-nfc-player.
+      # Copies each platform out of the multi-arch index; no rebuild.
+      - name: Push per-arch tags
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for pair in amd64:amd64 aarch64:arm64; do
+            hass_arch="${pair%%:*}"
+            platform="linux/${pair##*:}"
+            target="${ARCH_IMAGE/\{arch\}/$hass_arch}"
+            docker buildx imagetools create \
+              --platform "$platform" \
+              --annotation "index:org.opencontainers.image.source=$SOURCE_URL" \
+              -t "$target:$VERSION" -t "$target:latest" \
+              "$IMAGE:$VERSION"
+            docker buildx imagetools inspect "$target:$VERSION"
+          done
+
+  github-release:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create GitHub release from CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.image.outputs.version }}
+        run: |
+          # Section for this version: from "## X.Y.Z" up to the next "## ".
+          awk -v v="$VERSION" '
+            $0 == "## " v { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' nfc_player/CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Release $VERSION" > notes.md
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

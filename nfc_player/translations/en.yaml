@@ -1,0 +1,9 @@
+configuration:
+  log_level:
+    name: Log level
+    description: How much the app writes to its log. Use debug to trace a scan.
+  config_dir:
+    name: Config folder
+    description: >-
+      Where tags, settings, templates and backgrounds are stored. Keep it under
+      /homeassistant so the files are in your config backups and git.

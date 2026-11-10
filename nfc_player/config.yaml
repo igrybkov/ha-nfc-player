@@ -1,0 +1,25 @@
+name: NFC Player
+slug: nfc_player
+version: "0.1.0"
+description: Play music from NFC tags and print labels for them
+url: https://github.com/igrybkov/ha-nfc-player
+arch:
+  - amd64
+  - aarch64
+image: ghcr.io/igrybkov/ha-nfc-player
+init: false
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:nfc-variant
+panel_title: NFC Player
+watchdog: http://[HOST]:[PORT:8099]/healthz
+map:
+  - type: homeassistant_config
+    read_only: false
+options:
+  log_level: info
+  config_dir: /homeassistant/nfc_player
+schema:
+  log_level: list(debug|info|warn|error)
+  config_dir: str
