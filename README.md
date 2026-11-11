@@ -135,3 +135,11 @@ and make it public. Check with a logged-out
 
 MIT. See [LICENSE](LICENSE). The bundled Noto Sans fonts are under the SIL
 Open Font License (`assets/fonts/OFL.txt`).
+
+## Dependencies
+
+Renovate (`renovate.json`) opens update PRs on Monday mornings, for Go
+modules, the Docker base images and GitHub Actions. It waits 3 days after
+a release before it proposes it. Minor, patch and digest updates merge by
+themselves once CI passes; major updates wait for review. A merged update
+doesn't release: bump the version for that.
