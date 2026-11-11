@@ -13,8 +13,9 @@
 - Label PDFs embed complete fonts. Some printers (HP LaserJet) silently
   dropped the old PDFs and printed nothing.
 - Label PDFs are named after what they print: the label titles in print
-  order, each shortened so one long name doesn't crowd out the rest, and a
-  short hash of the job (`five-fin-the-rasm-disturbe-linkin-p-k3x9q2mf.pdf`).
+  order, each shortened so one long name doesn't crowd out the rest (short
+  names leave their spare room to long ones), and a short hash of the job
+  (`five-finger-de-the-rasmus-disturbed-k3x9q2mf.pdf`).
 
 ## 0.2.2
 

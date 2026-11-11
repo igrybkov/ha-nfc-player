@@ -982,15 +982,20 @@ func TestPDFNames(t *testing.T) {
 		return m[1], m[2]
 	}
 
-	// Each title gets its share of 35 characters, at least 8.
+	// Each title gets its share of 35 characters, at least 8; a title
+	// shorter than its share leaves the rest to the others.
 	for _, c := range []struct {
 		titles []string
 		want   string
 	}{
 		{[]string{"Five Finger Death Punch"}, "five-finger-death-punch"},
-		{[]string{"Five Finger Death Punch", "The Rasmus"}, "five-finger-death-the-rasmus"},
-		{[]string{"Five Finger Death Punch", "The Rasmus", "Disturbed"}, "five-finger-the-rasmus-disturbed"},
+		{[]string{"Five Finger Death Punch", "The Rasmus"}, "five-finger-death-punch-the-rasmus"},
+		{[]string{"Five Finger Death Punch", "The Rasmus", "Disturbed"}, "five-finger-de-the-rasmus-disturbed"},
 		{[]string{"Five Finger Death Punch", "The Rasmus", "Disturbed", "Linkin Park"}, "five-fin-the-rasm-disturbe-linkin-p"},
+		// A short name leaves its budget to the others, wherever it is.
+		{[]string{"The Hu", "Five Finger Death Punch"}, "the-hu-five-finger-death-punch"},
+		{[]string{"Five Finger Death Punch", "The Hu", "Disturbed"}, "five-finger-death-the-hu-disturbed"},
+		{[]string{"The Hu", "Five Finger Death Punch", "Linkin Park"}, "the-hu-five-finger-deat-linkin-park"},
 		{[]string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S"}, "a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r"},
 	} {
 		ascii, _ := pdfNames(job(c.titles...), c.titles)

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
@@ -298,7 +299,7 @@ const (
 
 // pdfNames returns the PDF file name without ".pdf", in ASCII and in UTF-8:
 // the label titles in print order, slugged, each cut to its share of
-// pdfNameLen (at least pdfTitleMin), joined and cut to pdfNameLen,
+// pdfNameLen (see shares), joined and cut to pdfNameLen,
 // then an 8-character hash of the entries and the print settings, so two
 // different runs of the same labels get different names. The ASCII name drops
 // letters outside a-z (a Cyrillic title vanishes); "labels" stands in when
@@ -321,12 +322,8 @@ func pdfNames(job labels.Job, entryIDs []string) (ascii, utf string) {
 				parts = append(parts, s)
 			}
 		}
-		share := pdfNameLen
-		if n := len(parts); n > 1 {
-			share = max(pdfTitleMin, (pdfNameLen-(n-1))/n) // n-1 dashes between them
-		}
-		for i, p := range parts {
-			parts[i] = cutRunes(p, share)
+		for i, n := range shares(parts) {
+			parts[i] = cutRunes(parts[i], n)
 		}
 		joined := cutRunes(strings.Join(parts, "-"), pdfNameLen)
 		if joined == "" {
@@ -337,6 +334,44 @@ func pdfNames(job labels.Job, entryIDs []string) (ascii, utf string) {
 	ascii = name(func(r rune) bool { return r < unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) })
 	utf = name(func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) })
 	return ascii, utf
+}
+
+// shares splits the pdfNameLen budget, less the dashes between parts, over
+// the parts. A part shorter than an even share keeps its length, and what it
+// leaves goes to the longer parts, which share it evenly (the first ones get
+// the remainder). No share is under pdfTitleMin; the final cut to
+// pdfNameLen then drops what doesn't fit.
+func shares(parts []string) []int {
+	out := make([]int, len(parts))
+	budget := pdfNameLen - max(len(parts)-1, 0)
+	long := make([]int, 0, len(parts)) // parts not yet given their length
+	for i := range parts {
+		long = append(long, i)
+	}
+	for len(long) > 0 {
+		share := max(pdfTitleMin, budget/len(long))
+		var rest []int
+		for _, i := range long {
+			if n := utf8.RuneCountInString(parts[i]); n <= share {
+				out[i] = n
+				budget -= n
+			} else {
+				rest = append(rest, i)
+			}
+		}
+		if len(rest) == len(long) { // all long: split what is left
+			extra := max(budget-share*len(rest), 0)
+			for k, i := range rest {
+				out[i] = share
+				if k < extra {
+					out[i]++
+				}
+			}
+			break
+		}
+		long = rest
+	}
+	return out
 }
 
 // cutRunes cuts s to at most n runes and drops dashes left at the end.
