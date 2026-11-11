@@ -717,3 +717,161 @@ an anonymous `docker pull` (logged out) before calling the release done.
 - Writing NFC tags from the app.
 - Sources other than Apple Music (the model allows them; no code yet).
 - Authentication beyond Ingress.
+
+## 13. v0.2: pools and play events
+
+Goal: anything in HA (a button, a dashboard tile, a state change) can start
+or stop music through the app with one `event` action. Replaces the kitchen
+button hold, the fireplace sound and Bath time automations, and the
+`play_music_in_a_room` script. Shared types are in `model` (Pool, PoolItem,
+PoolAll, Target, PlayCommand, PlayResult, PoolLookup, Scan.Source/PoolID/
+Media/Entity, ScanStopped) and `player.Request.Radio`; they are fixed.
+
+### Pools (`pools.yaml` in config_dir)
+
+```yaml
+version: 1
+pools:
+  - id: kitchen
+    name: Kitchen
+    shuffle: true      # nil = item decides
+    repeat: all        # nil = item decides
+    volume: null       # nil = item decides, then area volume
+    player: null       # nil = item decides, then settings chain
+    items:
+      - tag: kenny-rogers-21-number-ones                 # entry id
+      - media: Cat Stevens — Teaser and the Firecat     # any PlayCommand.Media
+      - media: https://music.apple.com/us/artist/the-dead-south/668262442
+```
+
+- `id` is a slug like entry ids (lowercase, digits, `-`); from the name if
+  empty; `all` is reserved. At least one item. Each item has exactly one of
+  `tag` / `media`. A `tag` must name an existing entry when saved; an entry
+  deleted later just makes that item fail at play time (recorded as error).
+  `media` is checked like a play command's media: a URL must catalog.Parse.
+- `PoolAll` ("all") is built in: every entry, not stored.
+- Picking: uniform random, never the same item twice in a row for a pool
+  with 2+ items (last pick kept in memory per pool).
+- Settings precedence, highest first: command, pool, tag entry, defaults
+  (shuffle false, repeat all, area volume, settings chain).
+
+### Pool tags
+
+- `model.Entry.Pool`: an entry plays a pool instead of a URL. Exactly one
+  of `url` / `pool` is set (registry validation). The pool id must be a
+  valid slug or `all`; an unknown pool is not a save error (pools and tags
+  are edited separately), it fails at play time.
+- Playing it: pick from the pool as a command would. Entry Volume and
+  Player (non-nil) beat the pool's; entry Shuffle/Repeat are ignored.
+- No nesting: a pool item that is a tag with a pool fails at play time
+  ("nested pool"); `all` skips pool entries when picking.
+- Artwork: `pools.Artwork` wraps the ArtworkSource. For an entry with a
+  pool and no `label.artwork`, it uses the art of the pool's first item
+  that has a URL (a tag item's entry URL, or a media URL that parses).
+  main wraps the cache with it, so web and labels need no change.
+- UI (track C): the tag editor picks "URL" or "Pool" (select of pools plus
+  "All tags"); shuffle/repeat are hidden for a pool. The tags list shows
+  the pool name where the URL kind is shown.
+
+### Events (track A, package `scan`)
+
+`nfc_player_play`, data (all optional except the target and one media):
+
+| key | type | meaning |
+|---|---|---|
+| `area` | area id | play in this area (rooms resolution as for tags) |
+| `player` | entity id | play on this media_player only; must be a sonos or music_assistant entity |
+| `media` | string | URL, `Artist — Album`, or a name to search |
+| `tag` | string | entry id or entry name |
+| `pool` | string | pool id or `all` |
+| `volume` | int 0-100 | |
+| `shuffle` | bool | |
+| `repeat` | off/one/all | |
+| `radio` | bool | MA radio mode; Sonos doesn't Support it |
+| `toggle` | bool | if the target is playing, stop it and do nothing else |
+
+`nfc_player_stop`, data: `area` or `player`.
+
+- Media is the first non-empty of media, tag, pool. Empty strings count as
+  unset (templates render `''`).
+- Values come from templates, so decode leniently: `"30"`, `30`, `30.0` are
+  30; `true`/`"true"`/`"on"`/`"yes"`/`1` are true; `""` and null are unset.
+  Bad values make the event an error in the log, never a panic.
+- Media text resolution: catalog.Parse, then ParseQuery ("Artist — Album"),
+  else a name-only player.Query{Album: text}. musicassistant.Search leaves
+  the `artist` key out when Artist is empty.
+- `player` target: look up the entity in the entity registry. Platform
+  sonos -> Area{SonosEntity: e}; music_assistant -> Area{MAEntity: e};
+  anything else is an error. Area id, name and volume come from the
+  entity's area (entity override, else device); no area -> rooms default
+  volume. New: `rooms.Resolver.Entity(ctx, entityID) (Area, error)`.
+- Events take the same per-area worker and lock as tag scans (no reader
+  filter, no DeviceArea). The lock key is the area id, or `entity:<id>`
+  when the entity has no area. Same MaxScanAge check, same queue limits.
+- Toggle and stop run inside the area lock and read live state (ha.States,
+  not cached). Playing = state `playing` on any target entity (the area's
+  Sonos and MA entities, or the given player). Stop = media_player.media_stop
+  on every target entity that is playing (stop with nothing playing calls
+  media_stop on the Sonos entity, else the MA entity). A toggle that stops
+  records ScanStopped and returns PlayResult{Stopped: true}.
+- Every event and UI command goes into the ScanLog with Source set.
+  TagName holds a short description for the UI ("pool kitchen", "tag x",
+  or the media text).
+- `Handler.Run` subscribes to all three events. Web's Play/Stop calls go
+  through the same code (Source ui), synchronously, under the area lock.
+
+### Players
+
+- `player.Request.Radio`: Sonos.Supports returns false. MA passes
+  `radio_mode: true` to music_assistant.play_media.
+
+### Web (track C)
+
+| method | path | body / result |
+|---|---|---|
+| GET | `/api/pools` | `{"pools": [Pool...]}` (stored pools only) |
+| POST | `/api/pools` | Pool -> Pool (201) |
+| PUT | `/api/pools/{id}` | Pool -> Pool; id change allowed as for tags |
+| DELETE | `/api/pools/{id}` | 204 |
+| POST | `/api/play` | PlayCommand -> PlayResult |
+| POST | `/api/stop` | Target -> `{"player": "..."}` |
+
+Errors as for tags (400 invalid, 404 unknown, 409 duplicate, 502 player).
+
+UI:
+- New "Pools" tab: pool list; editor with name, id, shuffle/repeat/volume/
+  player (each with "item decides"), items list. Add item: fuzzy tag picker
+  (thumbnails, reuse searchList) or a free-text media field. Remove and
+  reorder items.
+- A play box on the Pools tab: source (pool incl. "All tags", tag, or free
+  media text), area select, Play and Stop buttons, result line.
+- Scans view: show Source; for event/ui rows show the TagName description,
+  pool and media.
+
+### Ownership
+
+- Track A (backend): `internal/pools/` (new: store, validation, CRUD, slug,
+  implements model.PoolLookup, mirrors registry), `internal/scan/`,
+  `internal/rooms/`, `internal/player/**`, `cmd/nfc-player/` (wiring,
+  e2e), `examples/pools.yaml`.
+- Track C (web): `internal/web/**` (Go and UI), `internal/registry/`
+  (url/pool validation), `nfc_player/DOCS.md`, `README.md`. Track C uses `pools` only through the exported API of
+  track A's `pools.Store` below, and may stub it in tests:
+
+```go
+package pools
+type File struct { Version int `yaml:"version" json:"version"`; Pools []model.Pool `yaml:"pools" json:"pools"` }
+func DefaultFile() File
+func New(f *store.File[File], entries model.EntryLookup) *Store
+func (s *Store) Pool(id string) (model.Pool, bool) // model.PoolLookup; "all" built from entries
+type Artwork struct { Pools *Store; Source model.ArtworkSource } // model.ArtworkSource
+func (s *Store) All() []model.Pool                  // stored pools, file order
+func (s *Store) Get(id string) (model.Pool, error)
+func (s *Store) Create(p model.Pool) (model.Pool, error)
+func (s *Store) Update(id string, p model.Pool) (model.Pool, error)
+func (s *Store) Delete(id string) error
+var ErrNotFound, ErrDuplicate, ErrInvalid error // wrapped like registry's
+```
+
+- Phase lead (not agents): model, this section, version bump, CHANGELOG,
+  release, and the HA-side migration.

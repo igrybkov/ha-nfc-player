@@ -391,3 +391,13 @@ func (r *Ring) Recent() []model.Scan {
 	}
 	return out
 }
+
+// Play runs a play command. Stub until track A lands it.
+func (h *Handler) Play(ctx context.Context, cmd model.PlayCommand) (model.PlayResult, error) {
+	return model.PlayResult{}, errors.New("play: not implemented")
+}
+
+// Stop stops playback on a target. Stub until track A lands it.
+func (h *Handler) Stop(ctx context.Context, t model.Target) (string, error) {
+	return "", errors.New("stop: not implemented")
+}

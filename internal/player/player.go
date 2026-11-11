@@ -15,7 +15,9 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/rooms"
 )
 
-// Query is the "Artist — Album" search fallback for unknown tag names.
+// Query is a search: "Artist — Album" from an unknown tag name, or a bare
+// name from a play command. An empty Artist searches by Album (the name)
+// alone.
 type Query struct {
 	Artist string
 	Album  string
@@ -29,6 +31,7 @@ type Request struct {
 	Volume  int // percent
 	Shuffle bool
 	Repeat  string // off | one | all
+	Radio   bool   // Music Assistant radio mode; players that can't do it don't Support the request
 }
 
 // Player plays media on one kind of speaker.

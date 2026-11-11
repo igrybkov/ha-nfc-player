@@ -38,6 +38,7 @@ const (
 	SettingsFile    = "settings.yaml"
 	TemplatesFile   = "templates.yaml"
 	BackgroundsFile = "backgrounds.yaml"
+	PoolsFile       = "pools.yaml"
 )
 
 // Path returns the full path of a file in ConfigDir.

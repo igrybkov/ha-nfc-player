@@ -33,12 +33,15 @@ func (r Repeat) Valid() bool {
 	return false
 }
 
-// Entry is one tag entry in tags.yaml.
+// Entry is one tag entry in tags.yaml. It plays either one URL or a random
+// item of a pool. A pool entry's Volume and Player override the pool's;
+// its Shuffle and Repeat are ignored (the pool and the item decide).
 type Entry struct {
 	ID      string         `yaml:"id" json:"id"`
 	Name    string         `yaml:"name" json:"name"`
 	TagIDs  []string       `yaml:"tag_ids" json:"tag_ids"`
-	URL     string         `yaml:"url" json:"url"`
+	URL     string         `yaml:"url" json:"url"`   // empty when Pool is set
+	Pool    string         `yaml:"pool" json:"pool"` // pool id or PoolAll; empty when URL is set
 	Shuffle bool           `yaml:"shuffle" json:"shuffle"`
 	Repeat  Repeat         `yaml:"repeat" json:"repeat"`
 	Volume  *int           `yaml:"volume" json:"volume"` // percent; nil = room default
@@ -52,6 +55,31 @@ type LabelOverrides struct {
 	Subtitle *string `yaml:"subtitle" json:"subtitle"`
 	Artwork  *string `yaml:"artwork" json:"artwork"` // URL or path under config_dir; nil = auto
 }
+
+// Pool is one pool in pools.yaml: a named list of items. A play event or
+// the UI picks one item at random. Nil settings defer to the item: a tag
+// item uses its entry's settings, a media item the defaults (no shuffle,
+// repeat all, area volume, settings chain). Precedence, highest first:
+// play command, pool, tag entry, defaults.
+type Pool struct {
+	ID      string     `yaml:"id" json:"id"`
+	Name    string     `yaml:"name" json:"name"`
+	Items   []PoolItem `yaml:"items" json:"items"`
+	Shuffle *bool      `yaml:"shuffle" json:"shuffle"`
+	Repeat  *Repeat    `yaml:"repeat" json:"repeat"`
+	Volume  *int       `yaml:"volume" json:"volume"` // percent
+	Player  *string    `yaml:"player" json:"player"` // player name
+}
+
+// PoolItem is one pool item. Exactly one field is set.
+type PoolItem struct {
+	Tag   string `yaml:"tag,omitempty" json:"tag,omitempty"`     // entry id
+	Media string `yaml:"media,omitempty" json:"media,omitempty"` // see PlayCommand.Media
+}
+
+// PoolAll is the built-in pool of every tag entry. It is not stored and
+// can't be edited; a stored pool can't use this id.
+const PoolAll = "all"
 
 // NormalizeName turns an HA tag name into the registry lookup key: cut at the
 // first "|", trim spaces, lower case. Scan and registry must both use it.
@@ -150,6 +178,14 @@ const (
 	ScanNoMatch ScanResult = "no_match"
 	ScanIgnored ScanResult = "ignored"
 	ScanError   ScanResult = "error"
+	ScanStopped ScanResult = "stopped" // a toggle found music playing and stopped it
+)
+
+// Scan sources.
+const (
+	SourceTag   = "tag"   // tag_scanned event
+	SourceEvent = "event" // nfc_player_play / nfc_player_stop event
+	SourceUI    = "ui"    // play or stop from the web UI
 )
 
 // Scan is one handled tag_scanned event.
@@ -163,6 +199,10 @@ type Scan struct {
 	Player   string     `json:"player"`   // player that handled it
 	Result   ScanResult `json:"result"`
 	Error    string     `json:"error"`
+	Source   string     `json:"source"`  // SourceTag, SourceEvent or SourceUI
+	PoolID   string     `json:"pool_id"` // pool the item was picked from
+	Media    string     `json:"media"`   // media played when not an entry
+	Entity   string     `json:"entity"`  // target player entity, when given
 }
 
 // EntryLookup is the read side of the registry, used by scan.
@@ -186,11 +226,62 @@ type ScanLog interface {
 	Recent() []Scan // newest first
 }
 
-// PlayService is used by web for test play and the areas screen.
-// Implemented by scan (track A).
+// PlayService is used by web for test play, the play box and the areas
+// screen. Implemented by scan (track A).
 type PlayService interface {
 	PlayEntry(ctx context.Context, entry Entry, areaID string) (player string, err error)
+	// Play runs a play command: from an nfc_player_play event or the UI.
+	// It is recorded in the ScanLog.
+	Play(ctx context.Context, cmd PlayCommand) (PlayResult, error)
+	// Stop stops playback on the target: from an nfc_player_stop event or
+	// the UI. It is recorded in the ScanLog.
+	Stop(ctx context.Context, t Target) (player string, err error)
 	Areas(ctx context.Context) ([]AreaInfo, error)
+}
+
+// Target is where a command plays: an HA area, or one media player entity.
+// Exactly one is set. An entity must belong to a registered player's
+// integration (sonos or music_assistant).
+type Target struct {
+	AreaID string `json:"area"`
+	Entity string `json:"player"`
+}
+
+// PlayCommand is one play request. The media is the first non-empty of
+// Media, Tag and Pool.
+//
+// Media is a music URL (catalog.Parse), an "Artist — Album" name, or any
+// other text, which is searched as a name (Music Assistant).
+// Tag is an entry id, or an entry name (NormalizeName).
+// Pool is a pool id, or PoolAll.
+//
+// Nil settings defer to the pool, then the entry, then the defaults.
+type PlayCommand struct {
+	Target
+	Media   string  `json:"media"`
+	Tag     string  `json:"tag"`
+	Pool    string  `json:"pool"`
+	Volume  *int    `json:"volume"`
+	Shuffle *bool   `json:"shuffle"`
+	Repeat  *Repeat `json:"repeat"`
+	Radio   bool    `json:"radio"`  // Music Assistant radio mode; Sonos can't
+	Toggle  bool    `json:"toggle"` // if the target is playing, stop instead
+	Source  string  `json:"-"`      // SourceEvent or SourceUI
+}
+
+// PlayResult is the outcome of a play command.
+type PlayResult struct {
+	Player  string `json:"player"`   // player that played or stopped it
+	Stopped bool   `json:"stopped"`  // Toggle stopped music instead of playing
+	EntryID string `json:"entry_id"` // entry played, if any
+	PoolID  string `json:"pool_id"`  // pool picked from, if any
+	Media   string `json:"media"`    // media played when not an entry
+}
+
+// PoolLookup is the read side of the pool store, used by scan.
+// Implemented by pools (track A).
+type PoolLookup interface {
+	Pool(id string) (Pool, bool) // PoolAll included
 }
 
 // AreaInfo is an HA area with its resolved players and volume.
