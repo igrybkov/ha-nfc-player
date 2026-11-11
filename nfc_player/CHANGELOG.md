@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Selecting labels on the Print screen or searching a list no longer
+  reloads every thumbnail.
+
 ## 0.1.0
 
 - First release.

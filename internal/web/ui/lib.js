@@ -118,9 +118,18 @@ function hash(s) {
   return (x >>> 0).toString(36);
 }
 
+// Thumbnails are reused by URL, so a list re-render (search, selection)
+// moves the loaded image instead of fetching it again. A node that is still
+// on the page is never stolen; a second copy gets a fresh element.
+const thumbs = new Map();
+
 export function thumb(entry, size = 48) {
-  const img = h('img', { class: 'thumb', loading: 'lazy', alt: '', width: size, height: size, src: artURL(entry, size * 2) });
+  const src = artURL(entry, size * 2);
+  const cached = thumbs.get(src);
+  if (cached && !cached.isConnected) return cached;
+  const img = h('img', { class: 'thumb', loading: 'lazy', alt: '', width: size, height: size, src });
   img.addEventListener('error', () => img.classList.add('missing'), { once: true });
+  thumbs.set(src, img);
   return img;
 }
 
@@ -139,6 +148,8 @@ export function searchList({ items, text, row, onEnter, placeholder = 'Search', 
   function render() {
     shown = filter(all, input.value, text);
     active = Math.min(active, Math.max(shown.length - 1, 0));
+    // Detach the old rows first so their thumbnails can be reused.
+    list.replaceChildren();
     list.replaceChildren(...shown.map((r, i) => {
       const li = h('li', {
         class: i === active ? 'active' : '',
