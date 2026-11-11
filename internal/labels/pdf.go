@@ -32,7 +32,8 @@ var outlineGray = color.RGBA{153, 153, 153, 0xFF} // script: Color(0.6, 0.6, 0.6
 // inside the slot shrunk by InsetMM, clipped to a rounded rect. Non-white
 // backgrounds bleed BleedMM past the label left, right and top; downward only
 // when the slot below is printed in this job or the label is in the last row,
-// else EdgeBleedMM. Outline adds a gray outline on every slot of every page,
+// else EdgeBleedMM. The first and last columns bleed OuterBleedMM more toward
+// the paper edge. Outline adds a gray outline on every slot of every page,
 // so an outline job with no items prints one page of outlines.
 func Render(w io.Writer, job Job) error {
 	t := job.Template
@@ -67,7 +68,14 @@ func Render(w io.Writer, job Job) error {
 			if !job.Background.IsWhite() {
 				// Bleed past the edge, so printer drift leaves no white strip.
 				c.SetFill(bg)
-				c.Rect(Rect{r.X - bleed, r.Y - bleed, r.W + 2*bleed, r.H + bleed + p.bottomBleedMM*PointsPerMM})
+				left, right := bleed, bleed
+				if p.col == 0 {
+					left += job.OuterBleedMM * PointsPerMM
+				}
+				if p.col == t.Grid.Cols-1 {
+					right += job.OuterBleedMM * PointsPerMM
+				}
+				c.Rect(Rect{r.X - left, r.Y - bleed, r.W + left + right, r.H + bleed + p.bottomBleedMM*PointsPerMM})
 			}
 			cell := r.Inset(inset)
 			c.pushClip(cell)

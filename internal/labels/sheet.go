@@ -25,7 +25,8 @@ type Job struct {
 	Skip                          int // empty slots before the first label, after the start slot
 	Offset                        model.Offset
 	InsetMM, BleedMM, EdgeBleedMM float64
-	Outline                       bool // draw label outlines (template preview)
+	OuterBleedMM                  float64 // extra bleed on the paper-edge side of the first and last columns
+	Outline                       bool    // draw label outlines (template preview)
 }
 
 // SlotState is the state of one slot in the sheet map.
@@ -89,7 +90,7 @@ func (j Job) validate(t Template) error {
 		// The first page would be blank. That is a mistake, not a print run.
 		errs = append(errs, fmt.Errorf("start slot plus skip (%d) leaves no free slot on the first sheet of %d", j.skipSlots(t), t.PerSheet()))
 	}
-	for name, v := range map[string]float64{"inset": j.InsetMM, "bleed": j.BleedMM, "edge bleed": j.EdgeBleedMM} {
+	for name, v := range map[string]float64{"inset": j.InsetMM, "bleed": j.BleedMM, "edge bleed": j.EdgeBleedMM, "outer bleed": j.OuterBleedMM} {
 		if !(v >= 0) {
 			errs = append(errs, fmt.Errorf("%s must be >= 0 mm", name))
 		}

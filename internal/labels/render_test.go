@@ -2,13 +2,17 @@ package labels_test
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -341,6 +345,66 @@ func TestBuiltinBackgroundFadeColors(t *testing.T) {
 		}
 		if b.FadeColor() != black || b.FadeTextColor() != white {
 			t.Errorf("%s: fade %v, fade text %v; want black under white (script look)", id, b.FadeColor(), b.FadeTextColor())
+		}
+	}
+}
+
+// fillRects returns the "x y w h re f" rectangles of every Flate content
+// stream in a PDF, in points.
+func fillRects(t *testing.T, data []byte) [][4]float64 {
+	t.Helper()
+	var out [][4]float64
+	streams := regexp.MustCompile(`(?s)/Filter\s*/FlateDecode[^>]*>>\s*stream\r?\n(.*?)endstream`)
+	rect := regexp.MustCompile(`(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) re f`)
+	for _, m := range streams.FindAllSubmatch(data, -1) {
+		zr, err := zlib.NewReader(bytes.NewReader(m[1]))
+		if err != nil {
+			continue
+		}
+		content, err := io.ReadAll(zr)
+		if err != nil {
+			continue // a font stream, not content
+		}
+		for _, r := range rect.FindAllSubmatch(content, -1) {
+			var v [4]float64
+			for i := range v {
+				v[i], _ = strconv.ParseFloat(string(r[i+1]), 64)
+			}
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// The first and last columns bleed OuterBleedMM more toward the paper edge;
+// the middle column and the inner sides are unchanged.
+func TestOuterBleed(t *testing.T) {
+	tpl := builtinTemplate(t, "avery-5260")
+	job := labels.Job{
+		Template: tpl, Background: builtinBackground(t, "black"),
+		Items:   []labels.Item{{Title: "A"}, {Title: "B"}, {Title: "C"}},
+		InsetMM: 1.5, BleedMM: 1.5, EdgeBleedMM: 0.4, OuterBleedMM: 1,
+	}
+	var buf bytes.Buffer
+	if err := labels.Render(&buf, job); err != nil {
+		t.Fatal(err)
+	}
+	rects := fillRects(t, buf.Bytes())
+	if len(rects) != 3 {
+		t.Fatalf("fills = %v, want 3", rects)
+	}
+	pt := func(mm float64) float64 { return mm * labels.PointsPerMM }
+	left := tpl.Margin.LeftIn * labels.PointsPerInch
+	w := tpl.Label.WidthIn * labels.PointsPerInch
+	step := w + tpl.Gap.ColIn*labels.PointsPerInch
+	want := [][2]float64{ // x from, x to
+		{left - pt(2.5), left + w + pt(1.5)},
+		{left + step - pt(1.5), left + step + w + pt(1.5)},
+		{left + 2*step - pt(1.5), left + 2*step + w + pt(2.5)},
+	}
+	for i, r := range rects {
+		if math.Abs(r[0]-want[i][0]) > 0.01 || math.Abs(r[0]+r[2]-want[i][1]) > 0.01 {
+			t.Errorf("column %d: fill x %.2f..%.2f, want %.2f..%.2f", i+1, r[0], r[0]+r[2], want[i][0], want[i][1])
 		}
 	}
 }

@@ -55,6 +55,7 @@ export async function render(view) {
   const inset = num(s.print.inset_mm, { min: 0, max: 10, step: 0.1 });
   const bleed = num(s.print.bleed_mm, { min: 0, max: 10, step: 0.1 });
   const edge = num(s.print.edge_bleed_mm, { min: 0, max: 10, step: 0.1 });
+  const outer = num(s.print.outer_bleed_mm ?? 1, { min: 0, max: 10, step: 0.1 });
 
   const offsetRows = Object.entries(s.print.offsets).map(([tid, o]) => {
     const x = num(o.x, { step: 0.05, 'aria-label': `${tid} X offset` });
@@ -81,7 +82,7 @@ export async function render(view) {
       rooms: { default_volume: readNum(defaultVolume) ?? 0, areas: areasOut, sonos_model_preference: list(sonosPref.value) },
       music_assistant: { config_entry_id: maEntry.value.trim() || null },
       // default_background is set on the Backgrounds screen; keep it.
-      print: { ...s.print, offsets, inset_mm: readNum(inset) ?? 0, bleed_mm: readNum(bleed) ?? 0, edge_bleed_mm: readNum(edge) ?? 0 },
+      print: { ...s.print, offsets, inset_mm: readNum(inset) ?? 0, bleed_mm: readNum(bleed) ?? 0, edge_bleed_mm: readNum(edge) ?? 0, outer_bleed_mm: readNum(outer) ?? 0 },
     };
   };
 
@@ -109,6 +110,8 @@ export async function render(view) {
     field('Integrations', integrations, 'Only scans from devices of these integrations play. Comma-separated.')),
   h('fieldset', {}, h('legend', { text: 'Print' }),
     h('div', { class: 'grid3' }, field('Inset mm', inset), field('Bleed mm', bleed), field('Edge bleed mm', edge)),
+    h('div', { class: 'grid3' }, field('Outer bleed mm', outer)),
+    h('p', { class: 'muted small', text: 'Outer bleed: extra fill on the paper-edge side of the first and last columns.' }),
     h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Template', 'X offset mm', 'Y offset mm', ''].map((c) => h('th', { text: c })))),
       h('tbody', {}, offsetRows.map((r) => r.tr)))),

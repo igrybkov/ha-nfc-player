@@ -136,9 +136,23 @@ type PrintSettings struct {
 	InsetMM     float64           `yaml:"inset_mm" json:"inset_mm"`
 	BleedMM     float64           `yaml:"bleed_mm" json:"bleed_mm"`
 	EdgeBleedMM float64           `yaml:"edge_bleed_mm" json:"edge_bleed_mm"`
+	// OuterBleedMM is extra bleed on the paper-edge side of the first and
+	// last columns, where printers drift the most; nil = DefaultOuterBleedMM.
+	OuterBleedMM *float64 `yaml:"outer_bleed_mm" json:"outer_bleed_mm"`
 	// DefaultBackground is the background id a print starts with; "" or an
 	// id that no longer exists means DefaultBackgroundID.
 	DefaultBackground string `yaml:"default_background" json:"default_background"`
+}
+
+// DefaultOuterBleedMM is PrintSettings.OuterBleedMM when unset.
+const DefaultOuterBleedMM = 1.0
+
+// OuterBleed returns OuterBleedMM, or DefaultOuterBleedMM when unset.
+func (p PrintSettings) OuterBleed() float64 {
+	if p.OuterBleedMM == nil {
+		return DefaultOuterBleedMM
+	}
+	return *p.OuterBleedMM
 }
 
 // DefaultBackgroundID is the background used when none is chosen.

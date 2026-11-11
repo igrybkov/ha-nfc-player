@@ -757,7 +757,7 @@ func TestPrintPreview(t *testing.T) {
 		t.Fatalf("slots %v", got.Pages[0])
 	}
 	job := e.lbl.lastJob(t)
-	if job.Background.ID != "white" || job.InsetMM != 1.5 || job.BleedMM != 1.5 || job.EdgeBleedMM != 0.4 {
+	if job.Background.ID != "white" || job.InsetMM != 1.5 || job.BleedMM != 1.5 || job.EdgeBleedMM != 0.4 || job.OuterBleedMM != model.DefaultOuterBleedMM {
 		t.Fatalf("job %+v", job)
 	}
 	if len(got.MissingArt) != 0 {

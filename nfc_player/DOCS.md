@@ -94,7 +94,8 @@ Content-Security-Policy and can only be framed by Home Assistant itself.
   screen start with it (white until you pick one).
 - **Settings**: default volume (1 to 100), per-area volume (0 to 100), Sonos
   and Music Assistant entity per area, player order and fallback, reader
-  integrations, print inset and bleed.
+  integrations, print inset and bleed (outer bleed adds fill on the
+  paper-edge side of the first and last columns).
 
 ## Pools and play events
 

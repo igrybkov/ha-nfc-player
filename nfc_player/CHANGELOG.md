@@ -4,6 +4,8 @@
 
 - Pick the default background on the Backgrounds screen (**Make default**).
   The Print screen starts with it.
+- Labels in the first and last columns bleed 1 mm more toward the paper
+  edge, where printers drift most (**Settings → Outer bleed mm**).
 
 ## 0.3.0
 

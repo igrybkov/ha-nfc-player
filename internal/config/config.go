@@ -249,6 +249,7 @@ func ValidateSettings(v model.Settings) error {
 	}
 	for name, mm := range map[string]float64{
 		"print.inset_mm": v.Print.InsetMM, "print.bleed_mm": v.Print.BleedMM, "print.edge_bleed_mm": v.Print.EdgeBleedMM,
+		"print.outer_bleed_mm": v.Print.OuterBleed(),
 	} {
 		if mm < 0 || mm > maxPrintMM {
 			return bad("%s must be 0..%g, not %g", name, maxPrintMM, mm)

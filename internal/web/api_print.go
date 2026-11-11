@@ -238,6 +238,7 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 	job.InsetMM = settings.Print.InsetMM
 	job.BleedMM = settings.Print.BleedMM
 	job.EdgeBleedMM = settings.Print.EdgeBleedMM
+	job.OuterBleedMM = settings.Print.OuterBleed()
 	job.Outline = req.Outline
 	return job, entries, nil
 }
