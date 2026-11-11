@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.5.0
+## 0.5.1
+
+The tag v0.5.0 failed its build and was never released; 0.5.1 is that
+release.
+
 
 - Backgrounds are now **themes**. A theme sets the colors, and for each
   label format (small label, large label, dot) where the art goes: left,

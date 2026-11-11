@@ -88,7 +88,7 @@ history keeps the old files.
   records" items.
 - Version 4 (app 0.4.2) added item names. Nothing converts; an app of
   version 3 can't write these files, so it can't drop the names.
-- Version 5 (app 0.5.0) turned backgrounds into themes: `backgrounds.yaml`
+- Version 5 (app 0.5.1) turned backgrounds into themes: `backgrounds.yaml`
   becomes `themes.yaml`, and `print.default_background` in settings
   becomes `print.default_theme`. A template's `layout` becomes its
   `format`: `full` is `small`, `side` is `large`. Labels print as before.
