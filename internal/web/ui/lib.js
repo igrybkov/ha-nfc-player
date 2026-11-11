@@ -87,6 +87,9 @@ export function highlight(text, positions) {
 }
 
 // splitName mirrors the label split: "Artist — Album" → [artist, album].
+// byName sorts records by name, as people read them ("Track 2" before "Track 10").
+export const byName = (rs) => [...rs].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+
 export function splitName(name) {
   const i = name.indexOf('—');
   return i < 0 ? [name.trim(), ''] : [name.slice(0, i).trim(), name.slice(i + 1).trim()];
@@ -242,10 +245,14 @@ export function playerNames(settings) {
 }
 
 // areaSelect is a select of HA areas. It fills in when api/ha/areas answers.
+// Only areas with a speaker are listed: music can't play anywhere else.
 export function areaSelect() {
   const sel = h('select', { 'aria-label': 'Area' }, h('option', { value: '', text: 'Loading areas…' }));
   get('api/ha/areas').then((areas) => {
-    sel.replaceChildren(...areas.map((a) => h('option', { value: a.id }, a.name)));
+    const playable = areas.filter((a) => a.sonos_entity || a.ma_entity);
+    sel.replaceChildren(...(playable.length
+      ? playable.map((a) => h('option', { value: a.id }, a.name))
+      : [h('option', { value: '', text: 'No area has a speaker' })]));
   }).catch((e) => sel.replaceChildren(h('option', { value: '', text: `Areas unavailable: ${e.message}` })));
   return sel;
 }

@@ -21,7 +21,8 @@ plays, and prints labels for them.
    Sonos speakers play natively. Music Assistant is the fallback.
    Apple Music stations (`music.apple.com/.../station/...`) play on Sonos
    only: Music Assistant can't play them.
-6. Volume: the record's volume, else the area's, else the default volume.
+6. Volume: the area's volume (else the default volume), plus the record's
+   volume offset.
 
 ## Setup
 
@@ -76,9 +77,15 @@ app reloads the files when one changes on disk.
 Each file holds a `version`. When a new app version changes the format, it
 reads files of every older version and converts them in memory. It writes
 nothing until you save something. That first save writes every file in the
-new format and deletes files the new format no longer uses. Version 2 (app
-0.4.0) merged `tags.yaml` and `pools.yaml` into `records.yaml`. Your git
+new format and deletes files the new format no longer uses. Your git
 history keeps the old files.
+
+- Version 2 (app 0.4.0) merged `tags.yaml` and `pools.yaml` into
+  `records.yaml`.
+- Version 3 (app 0.4.1) turned a record's `volume` into `volume_offset`.
+  An old volume becomes null (no offset), since it can't know the room;
+  the log names each record that had one. It also dropped "all other
+  records" items.
 
 While a file does not parse, or comes from a newer app version, the app
 keeps using what it read last and refuses to save, so it never overwrites
@@ -119,7 +126,7 @@ can play a record or any album in one `event` action.
 Edit records on the **Records** tab, or by hand in `records.yaml`:
 
 ```yaml
-version: 2
+version: 3
 records:
   - id: kitchen
     name: Kitchen
@@ -134,7 +141,7 @@ records:
       playlists: null
       other: null       # songs, stations and names to search
     repeat: all         # null = all
-    volume: 30          # null = the area volume
+    volume_offset: 10   # added to the area volume; null = 0
     player: null        # null = the player order
     label:
       title: null       # null = from the name
@@ -149,7 +156,9 @@ records:
     Assistant searches for.
   - `record`: the id of another record. Records can hold records to any
     depth. A loop is skipped.
-  - `others: true`: every other record, each as one item.
+- `volume_offset` (-100 to 100) is added to the volume of the area it plays
+  in, so one record is louder or quieter everywhere. A play event's
+  `volume` is a fixed volume and wins.
 - A play picks one item at random. If that item is a record, it picks one
   of that record's items, and so on down. So in a record of five artists,
   each artist gets one play in five, however many albums it holds. The

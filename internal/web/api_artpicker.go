@@ -91,8 +91,8 @@ func (s *Server) recordArtCandidates(w http.ResponseWriter, r *http.Request) {
 
 // itemCandidates offers the art of each item of rec, in item order. A
 // record item whose art is a file shows through that record's art route,
-// so the preview proxy never reads files. Names, "others" and items
-// without art are left out.
+// so the preview proxy never reads files. Names and items without art are
+// left out.
 func (s *Server) itemCandidates(ctx context.Context, rec model.Record) []pickerItem {
 	items := rec.Items
 	if len(items) > maxItemCandidates {

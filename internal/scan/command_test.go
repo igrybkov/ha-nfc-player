@@ -315,7 +315,7 @@ func TestPlaySettingsPrecedence(t *testing.T) {
 		{"scanned record over inner record", model.PlayCommand{Record: "nest"}, want{0.55, false, "off"}},
 		{"command over record", model.PlayCommand{Record: "nest", Volume: ptr(10), Shuffle: ptr(true), Repeat: ptr(model.RepeatOne)}, want{0.10, true, "one"}},
 		{"tag alias", model.PlayCommand{Tag: "nest-tag"}, want{0.55, false, "off"}},
-		{"tag by name", model.PlayCommand{Tag: "Disturbed — Divisible | x"}, want{0.50, false, "all"}},
+		{"tag by name", model.PlayCommand{Tag: "Disturbed — Divisible | x"}, want{0.35, false, "all"}},
 		{"record by name", model.PlayCommand{Record: "metallica — essential"}, want{0.15, true, "all"}},
 		{"defaults", model.PlayCommand{Media: queenURL}, want{0.15, false, "all"}},
 	}

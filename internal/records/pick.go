@@ -27,7 +27,7 @@ type option struct {
 // Pick chooses media for record id. At each level it takes one item at
 // random, all items equal, then goes down into it when it is a record: so
 // a record of five artists gives each artist a fifth, whatever each one
-// holds. "Others" counts as one item per other record. Items that lead to
+// holds. Items that lead to
 // no media (empty, missing or looping records) are skipped. The pick
 // differs from the last one for id when another is possible.
 func (s *Store) Pick(id string) (Pick, error) {
@@ -101,8 +101,8 @@ func (p *picker) pick(r model.Record, path []string, idx []int) (string, []strin
 	return "", nil, nil, false
 }
 
-// options lists r's choices in a stable order: its items, with "others"
-// as every other record not already on the path, in file order.
+// options lists r's choices in item order. A record already on the path
+// is left out, so loops end.
 func (p *picker) options(r model.Record, path []string) []option {
 	var out []option
 	for _, it := range r.Items {
@@ -112,12 +112,6 @@ func (p *picker) options(r model.Record, path []string) []option {
 		case it.Record != "":
 			if !slices.Contains(path, it.Record) {
 				out = append(out, option{record: it.Record})
-			}
-		case it.Others:
-			for _, o := range p.all {
-				if !slices.Contains(path, o.ID) {
-					out = append(out, option{record: o.ID})
-				}
 			}
 		}
 	}

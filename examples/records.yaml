@@ -5,7 +5,7 @@
 # A record plays when an HA tag with its name is scanned. Each item is media
 # (a URL, "Artist — Album", or a name to search), another record, or
 # "others: true" for every other record.
-version: 2
+version: 3
 records:
   - id: metallica-essential
     name: Metallica — Essential
@@ -14,7 +14,7 @@ records:
       - media: https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5
     shuffle: {albums: true, artists: true, playlists: true, other: true}
     repeat: all
-    volume: null
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}
   - id: disturbed-divisible
@@ -24,7 +24,7 @@ records:
       - media: https://music.apple.com/us/album/divisive/1646032515
     shuffle: {albums: false, artists: false, playlists: false, other: false}
     repeat: all
-    volume: null
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}
   - id: creedence-clearwater-revival-essential
@@ -34,7 +34,7 @@ records:
       - media: https://music.apple.com/us/playlist/creedence-clearwater-revival-essentials/pl.a64e22c649a64385b037a8f1a1559cb1
     shuffle: {albums: true, artists: true, playlists: true, other: true}
     repeat: all
-    volume: null
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}
   - id: queen-bohemian-rhapsody-the-original-soundtrack
@@ -44,7 +44,7 @@ records:
       - media: https://music.apple.com/us/album/bohemian-rhapsody-the-original-soundtrack/6781027361
     shuffle: {albums: false, artists: false, playlists: false, other: false}
     repeat: all
-    volume: null
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}
   - id: volodymyr-ivasiuk
@@ -54,7 +54,7 @@ records:
       - media: https://music.apple.com/us/artist/%D0%B2%D0%BE%D0%BB%D0%BE%D0%B4%D0%B8%D0%BC%D0%B8%D1%80-%D1%96%D0%B2%D0%B0%D1%81%D1%8E%D0%BA/1797008889
     shuffle: {albums: true, artists: true, playlists: true, other: true}
     repeat: all
-    volume: null
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}
   - id: ray-charles-the-ultimate-collection
@@ -64,7 +64,7 @@ records:
       - media: https://music.apple.com/us/album/the-atlantic-hits/1544753335
     shuffle: {albums: true, artists: true, playlists: true, other: true}
     repeat: all
-    volume: null
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}
   - id: kenny-rogers-21-number-ones
@@ -74,7 +74,7 @@ records:
       - media: https://music.apple.com/us/playlist/kenny-rogers-essentials/pl.97c239b65c7e4e3eb786f27c74790b8b
     shuffle: {albums: true, artists: true, playlists: true, other: true}
     repeat: all
-    volume: null
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}
   - id: kitchen
@@ -91,6 +91,6 @@ records:
       - media: https://music.apple.com/us/playlist/boombox/pl.2fb591e573134d70b5ffd12d1bd42e0b
     shuffle: {albums: null, artists: null, playlists: null, other: null}
     repeat: all
-    volume: 30
+    volume_offset: null
     player: null
     label: {title: null, subtitle: null, artwork: null}

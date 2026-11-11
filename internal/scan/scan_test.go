@@ -52,19 +52,19 @@ func media(m ...string) []model.RecordItem {
 
 var testRecords = []model.Record{
 	{ID: "metallica-essential", Name: "Metallica — Essential", Items: media(metallicaURL), Shuffle: shuffleAll(true), Repeat: ptr(model.RepeatAll)},
-	{ID: "disturbed-divisible", Name: "Disturbed — Divisible", Items: media(disturbedURL), Shuffle: shuffleAll(false), Volume: ptr(50)},
+	{ID: "disturbed-divisible", Name: "Disturbed — Divisible", Items: media(disturbedURL), Shuffle: shuffleAll(false), VolumeOffset: ptr(20)},
 	{ID: "queen", Name: "Queen — Bohemian Rhapsody", Items: media(queenURL), Repeat: ptr(model.RepeatOne)},
 	{ID: "on-ma", Name: "On MA", Items: media(disturbedURL), Player: ptr("music_assistant")},
 	// Three items: a record, a URL and a name to search.
-	{ID: "kitchen", Name: "Kitchen", Aliases: []string{"tag:kitchen-tag", "pool:kitchen"}, Repeat: ptr(model.RepeatOne), Volume: ptr(40),
+	{ID: "kitchen", Name: "Kitchen", Aliases: []string{"tag:kitchen-tag", "pool:kitchen"}, Repeat: ptr(model.RepeatOne), VolumeOffset: ptr(25),
 		Items: []model.RecordItem{{Record: "metallica-essential"}, {Media: queenURL}, {Media: "Volodymyr Ivasiuk"}}},
-	{ID: "party", Name: "Party Mix", Items: media(queenURL), Volume: ptr(40)},
+	{ID: "party", Name: "Party Mix", Items: media(queenURL), VolumeOffset: ptr(25)},
 	// An album with the shuffle defaults: in order.
-	{ID: "albums", Name: "Albums", Items: media(disturbedURL), Volume: ptr(40)},
+	{ID: "albums", Name: "Albums", Items: media(disturbedURL), VolumeOffset: ptr(25)},
 	// One path down to the Metallica playlist: its own settings apply, not
 	// metallica-essential's.
 	{ID: "nest", Name: "Nest", Aliases: []string{"tag:nest-tag"}, Items: []model.RecordItem{{Record: "metallica-essential"}},
-		Shuffle: model.Shuffle{Playlists: ptr(false)}, Repeat: ptr(model.RepeatOff), Volume: ptr(55)},
+		Shuffle: model.Shuffle{Playlists: ptr(false)}, Repeat: ptr(model.RepeatOff), VolumeOffset: ptr(40)},
 	// Hand edits the store would refuse: they fail at play time.
 	{ID: "empty", Name: "Empty"},
 	{ID: "missing", Name: "Missing", Items: []model.RecordItem{{Record: "deleted"}}},
@@ -262,7 +262,7 @@ func TestScanVolumeOrder(t *testing.T) {
 		name, tag, device string
 		want              float64
 	}{
-		{"record volume", "Disturbed — Divisible", "reader-fr", 0.50},
+		{"record offset on the area volume", "Disturbed — Divisible", "reader-fr", 0.50},
 		{"area volume", "Metallica — Essential", "reader-fr", 0.30},
 		{"default volume", "Metallica — Essential", "reader-garage", 0.15},
 	}
@@ -465,7 +465,8 @@ func TestPlayRecordAndAreas(t *testing.T) {
 	if err != nil || name != "sonos" {
 		t.Fatalf("PlayRecord = %q, %v", name, err)
 	}
-	if v := volumeOf(t, f.Calls); v != 0.50 {
+	// Office at 15, plus the record's offset of 20.
+	if v := volumeOf(t, f.Calls); v != 0.35 {
 		t.Errorf("volume = %v", v)
 	}
 	if _, err := h.PlayRecord(ctx, "bad-url", "office"); !errors.Is(err, ErrInvalid) {
@@ -621,8 +622,9 @@ func TestScanPlaysRecordByName(t *testing.T) {
 	if pm := playMedia(calls); len(pm) != 1 || pm[0].Data["media_content_id"] != queenURL {
 		t.Fatalf("play_media = %+v", pm)
 	}
-	if v := volumeOf(t, calls); v != 0.40 {
-		t.Errorf("volume = %v, want record volume 0.40", v)
+	// Family room at 30, plus the record's offset of 25.
+	if v := volumeOf(t, calls); v != 0.55 {
+		t.Errorf("volume = %v, want 0.55", v)
 	}
 }
 
@@ -636,8 +638,9 @@ func TestScanPlaysNestedRecord(t *testing.T) {
 		t.Fatalf("scan = %+v", s)
 	}
 	calls := hs.f.ServiceCalls()
-	if v := volumeOf(t, calls); v != 0.55 {
-		t.Errorf("volume = %v, want 0.55", v)
+	// Family room at 30, plus the scanned record's offset of 40.
+	if v := volumeOf(t, calls); v != 0.70 {
+		t.Errorf("volume = %v, want 0.70", v)
 	}
 	if !slices.ContainsFunc(calls, func(c hatest.ServiceCall) bool {
 		return c.Service == "shuffle_set" && c.Data["shuffle"] == false

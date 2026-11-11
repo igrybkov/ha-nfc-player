@@ -1,6 +1,6 @@
 // Print screen: pick records, set up the sheet, preview slots, open the PDF.
 import {
-  h, get, post, put, toast, run, highlight, thumb, searchList, field, num, readNum, select, openPDF,
+  h, get, post, put, toast, run, highlight, thumb, searchList, field, num, readNum, select, openPDF, byName,
 } from './lib.js';
 
 // Kept across visits so a half-done print setup survives a detour.
@@ -11,9 +11,10 @@ const state = { selected: [], template: '', background: '', copies: 1, row: 1, c
 const editLink = (id) => `#/records/edit/${encodeURIComponent(id)}`;
 
 export async function render(view) {
-  const [entries, templates, backgrounds, settings] = await Promise.all([
+  const [records, templates, backgrounds, settings] = await Promise.all([
     get('api/records'), get('api/templates'), get('api/backgrounds'), get('api/settings'),
   ]);
+  const entries = byName(records);
   const byID = new Map(entries.map((e) => [e.id, e]));
   state.selected = state.selected.filter((id) => byID.has(id));
   if (!templates.some((t) => t.id === state.template)) state.template = templates[0]?.id ?? '';

@@ -46,4 +46,9 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
+// Sticky toolbars sit under the sticky nav, whose height wraps on a phone.
+const setNavHeight = () => document.documentElement.style.setProperty('--nav-h', `${document.querySelector('header.top').offsetHeight}px`);
+window.addEventListener('resize', setNavHeight);
+setNavHeight();
+
 route();

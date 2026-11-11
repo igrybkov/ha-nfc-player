@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1
+
+- A record's volume is now an offset from the room's volume (-100 to
+  100). Files convert on read; an old fixed volume becomes no offset.
+- "All other records" is gone.
+- The record editor: Save, Delete and an "Unsaved changes" mark stay at
+  the top while you scroll. Items, add media and add a record sit
+  together; the label and its art sit together.
+- Label title and subtitle hints show exactly what prints, or nothing.
+- Area lists show only areas with a speaker.
+- Records are sorted by name everywhere.
+
 ## 0.4.0
 
 - **Records** replace tags and pools. A record is a tag name and what it

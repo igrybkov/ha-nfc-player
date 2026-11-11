@@ -40,20 +40,21 @@ type Record struct {
 	// Aliases are ids it had before: "tag:<id>" for a v1 tag entry,
 	// "pool:<id>" for a v1 pool, a plain id after a rename. Play events
 	// may still name those.
-	Aliases []string       `yaml:"aliases" json:"aliases"`
-	Items   []RecordItem   `yaml:"items" json:"items"`
-	Shuffle Shuffle        `yaml:"shuffle" json:"shuffle"`
-	Repeat  *Repeat        `yaml:"repeat" json:"repeat"` // nil = all
-	Volume  *int           `yaml:"volume" json:"volume"` // percent; nil = area volume
-	Player  *string        `yaml:"player" json:"player"` // player name; nil = settings chain
-	Label   LabelOverrides `yaml:"label" json:"label"`
+	Aliases []string     `yaml:"aliases" json:"aliases"`
+	Items   []RecordItem `yaml:"items" json:"items"`
+	Shuffle Shuffle      `yaml:"shuffle" json:"shuffle"`
+	Repeat  *Repeat      `yaml:"repeat" json:"repeat"` // nil = all
+	// VolumeOffset is added to the area's volume, in percentage points
+	// (-100..100); nil = the area volume as is.
+	VolumeOffset *int           `yaml:"volume_offset" json:"volume_offset"`
+	Player       *string        `yaml:"player" json:"player"` // player name; nil = settings chain
+	Label        LabelOverrides `yaml:"label" json:"label"`
 }
 
 // RecordItem is one item of a record. Exactly one field is set.
 type RecordItem struct {
 	Media  string `yaml:"media,omitempty" json:"media,omitempty"`   // see PlayCommand.Media
 	Record string `yaml:"record,omitempty" json:"record,omitempty"` // another record's id
-	Others bool   `yaml:"others,omitempty" json:"others,omitempty"` // every other record, one item each
 }
 
 // Shuffle says per media kind whether to shuffle. Nil takes the default:

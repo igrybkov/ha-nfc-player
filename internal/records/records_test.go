@@ -176,7 +176,7 @@ func TestPickAvoidsLastAndDeadBranches(t *testing.T) {
 	}
 }
 
-func TestPickOthersAndLoops(t *testing.T) {
+func TestPickLoops(t *testing.T) {
 	s := newStore(t)
 	a := mustCreate(t, s, model.Record{Name: "A", Items: media(albumURL)})
 	b := mustCreate(t, s, model.Record{Name: "B", Items: []model.RecordItem{{Record: a.ID}}})
@@ -185,21 +185,26 @@ func TestPickOthersAndLoops(t *testing.T) {
 	if _, err := s.Update(a.ID, a); err != nil {
 		t.Fatal(err)
 	}
-	all := mustCreate(t, s, model.Record{Name: "Everything", Items: []model.RecordItem{{Others: true}}})
-	seen := map[string]bool{}
 	for i := range 20 {
 		s.intn = seq(i)
-		p, err := s.Pick(all.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		seen[p.Path[1]] = true
-		if p.Media != albumURL {
-			t.Fatalf("pick %+v", p)
+		for _, id := range []string{a.ID, b.ID} {
+			if p, err := s.Pick(id); err != nil || p.Media != albumURL {
+				t.Fatalf("pick %s: %+v, %v", id, p, err)
+			}
 		}
 	}
-	if !seen[a.ID] || !seen[b.ID] || seen[all.ID] {
-		t.Errorf("others went to %v", seen)
+}
+
+func TestVolumeOffsetRange(t *testing.T) {
+	s := newStore(t)
+	for _, v := range []int{-101, 101} {
+		if _, err := s.Create(model.Record{Name: "R", Items: media(albumURL), VolumeOffset: &v}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("offset %d: %v", v, err)
+		}
+	}
+	v := -100
+	if _, err := s.Create(model.Record{Name: "R", Items: media(albumURL), VolumeOffset: &v}); err != nil {
+		t.Error(err)
 	}
 }
 

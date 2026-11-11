@@ -74,7 +74,7 @@ func TestSeedRecords(t *testing.T) {
 			t.Errorf("%s: media parses as %v, %v; want %s", r.ID, m.Kind, err, w.kind)
 		}
 		if r.Name != w.name || r.Shuffle.For(records.MediaKind(r.Items[0].Media)) != w.shuffle ||
-			r.Repeat == nil || *r.Repeat != model.RepeatAll || r.Volume != nil || r.Player != nil {
+			r.Repeat == nil || *r.Repeat != model.RepeatAll || r.VolumeOffset != nil || r.Player != nil {
 			t.Errorf("%s: %+v", r.ID, r)
 		}
 	}
@@ -85,7 +85,7 @@ func TestSeedRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	if k.Name != "Kitchen" || k.Shuffle != (model.Shuffle{}) || k.Repeat == nil || *k.Repeat != model.RepeatAll ||
-		k.Volume == nil || *k.Volume != 30 || k.Player != nil || len(k.Items) != 8 {
+		k.VolumeOffset != nil || k.Player != nil || len(k.Items) != 8 {
 		t.Errorf("kitchen = %+v", k)
 	}
 	if k.Items[0].Record != "kenny-rogers-21-number-ones" || k.Items[1].Media != "Cat Stevens — Teaser and the Firecat" {

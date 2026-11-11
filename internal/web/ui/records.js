@@ -1,7 +1,7 @@
 // Records screen: searchable record list with a play box, and the record editor.
 import {
   h, get, post, put, del, toast, run, highlight, thumb, bumpArt, searchList, artURL,
-  field, num, readNum, select, confirmDelete, focusIfDesktop, playerNames, areaSelect, splitName, artPicker, sized,
+  field, num, readNum, select, confirmDelete, focusIfDesktop, playerNames, areaSelect, splitName, artPicker, sized, byName,
 } from './lib.js';
 
 export async function render(view, rest, params) {
@@ -12,7 +12,6 @@ export async function render(view, rest, params) {
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const editURL = (id) => `#/records/edit/${encodeURIComponent(id)}`;
-const hasOthers = (r) => (r.items ?? []).some((i) => i.others);
 // isURL mirrors records.IsURL: such media text is a link with art of its own.
 const isURL = (m) => /^(https?:\/\/|(apple_music|spotify)(--[a-z0-9]+)?:\/\/|spotify:[a-z]+:)/i.test(m.trim());
 
@@ -27,21 +26,18 @@ function mediaThumb(media, size = 32) {
 }
 
 function summary(r) {
-  const items = r.items ?? [];
-  const n = items.filter((i) => !i.others).length;
+  const n = (r.items ?? []).length;
   return [
     r.id,
-    n > 0 && plural(n, 'item'),
-    hasOthers(r) && 'all other records',
-    !items.length && 'no items',
+    n > 0 ? plural(n, 'item') : 'no items',
     r.repeat && `repeat ${r.repeat}`,
-    r.volume != null && `vol ${r.volume}`,
+    r.volume_offset && `volume ${r.volume_offset > 0 ? '+' : ''}${r.volume_offset}`,
     r.player,
   ].filter(Boolean).join(' · ');
 }
 
 async function list(view) {
-  const records = await get('api/records');
+  const records = byName(await get('api/records'));
   const sl = searchList({
     items: records,
     text: (r) => r.name,
@@ -68,9 +64,8 @@ async function list(view) {
 // playBox plays a record or any media text in an area, through the same
 // path as an nfc_player_play event.
 function playBox(records) {
-  const byName = [...records].sort((a, b) => a.name.localeCompare(b.name));
   const kind = select([['record', 'Record'], ['media', 'Media']], 'record', { 'aria-label': 'Source' });
-  const record = select(byName.map((r) => [r.id, r.name]), '', { 'aria-label': 'Record' });
+  const record = select(byName(records).map((r) => [r.id, r.name]), '', { 'aria-label': 'Record' });
   const media = h('input', { 'aria-label': 'Media', autocomplete: 'off', spellcheck: 'false',
     placeholder: 'URL, Artist — Album, or a name' });
   const area = areaSelect();
@@ -128,7 +123,7 @@ function playBox(records) {
 
 function blankRecord(params) {
   return {
-    id: '', name: params?.get('name') || '', aliases: [], items: [], shuffle: null, repeat: null, volume: null, player: null,
+    id: '', name: params?.get('name') || '', aliases: [], items: [], shuffle: null, repeat: null, volume_offset: null, player: null,
     label: { title: null, subtitle: null, artwork: null },
   };
 }
@@ -159,17 +154,18 @@ async function editor(view, id, params) {
     shuffleBox('other', 'Shuffle the rest', true),
   ];
   const repeat = select([['', 'All'], ['one', 'One'], ['off', 'Off']], record.repeat === 'all' ? '' : record.repeat ?? '');
-  const volume = num(record.volume, { min: 0, max: 100, step: 1, placeholder: 'Room default' });
+  const volume = num(record.volume_offset, { min: -100, max: 100, step: 1, placeholder: '0' });
   const player = select([['', 'Default chain'], ...playerNames(settings).map((p) => [p, p])], record.player ?? '');
 
   const label = record.label ?? {};
   const title = h('input', { value: label.title ?? '' });
   const subtitle = h('input', { value: label.subtitle ?? '' });
   const artwork = h('input', { value: label.artwork ?? '', placeholder: 'Automatic' });
+  // An empty field prints what comes from the name; show exactly that.
   const syncPlaceholders = () => {
     const [t, s] = splitName(name.value);
-    title.placeholder = t || 'From name';
-    subtitle.placeholder = s || 'From name';
+    title.placeholder = t;
+    subtitle.placeholder = s;
   };
   name.addEventListener('input', syncPlaceholders);
   syncPlaceholders();
@@ -185,9 +181,20 @@ async function editor(view, id, params) {
   };
   showArt(false);
 
+  // Unsaved changes: the form compared with what was loaded. Set up after
+  // all fields exist (see below); until then nothing counts as changed.
+  let saved = null;
+  const dirtyBadge = h('span', { class: 'badge dirty', text: 'Unsaved changes', hidden: true });
+  const checkDirty = () => {
+    const dirty = saved !== null && JSON.stringify(collect()) !== saved;
+    dirtyBadge.hidden = !dirty;
+    return dirty;
+  };
+  const onLeave = (ev) => { if (checkDirty()) ev.preventDefault(); };
+
   // Items. A record item whose record was deleted stays in the list,
   // marked, so the user sees why the server refuses it and removes it.
-  const items = (record.items ?? []).map((i) => (i.others ? { others: true } : i.record ? { record: i.record } : { media: i.media }));
+  const items = (record.items ?? []).map((i) => (i.record ? { record: i.record } : { media: i.media }));
   const itemList = h('ol', { class: 'list plain items' });
   const move = (i, d) => {
     [items[i], items[i + d]] = [items[i + d], items[i]];
@@ -195,39 +202,31 @@ async function editor(view, id, params) {
   };
   const itemRow = (it, i) => {
     const r = it.record ? byID.get(it.record) : null;
-    const text = it.others
+    const text = it.record
       ? h('div', { class: 'grow' },
-        h('div', { class: 'title', text: 'All other records' }),
-        h('div', { class: 'muted small', text: 'every record not in this list' }))
-      : it.record
-        ? h('div', { class: 'grow' },
-          h('div', { class: 'title', text: r ? r.name : it.record }),
-          r ? h('div', { class: 'muted small', text: 'record' })
-            : h('div', { class: 'error small', text: 'record not found, remove it to save' }))
-        : h('div', { class: 'grow' },
-          h('div', { class: 'title', text: it.media }),
-          h('div', { class: 'muted small', text: 'media' }));
+        h('div', { class: 'title', text: r ? r.name : it.record }),
+        r ? h('div', { class: 'muted small', text: 'record' })
+          : h('div', { class: 'error small', text: 'record not found, remove it to save' }))
+      : h('div', { class: 'grow' },
+        h('div', { class: 'title', text: it.media }),
+        h('div', { class: 'muted small', text: 'media' }));
     const art = r ? thumb(r, 32) : it.media && isURL(it.media) ? mediaThumb(it.media) : h('span', { class: 'thumb s32' });
     return h('li', {}, h('div', { class: 'row' }, art, text,
       h('button', { type: 'button', class: 'icon', 'aria-label': 'Move up', text: '↑', disabled: i === 0, onclick: () => move(i, -1) }),
       h('button', { type: 'button', class: 'icon', 'aria-label': 'Move down', text: '↓', disabled: i === items.length - 1, onclick: () => move(i, 1) }),
       h('button', { type: 'button', class: 'icon', 'aria-label': 'Remove', text: '×', onclick: () => { items.splice(i, 1); drawItems(); } })));
   };
-  const othersBtn = h('button', { type: 'button', text: 'Add all other records', onclick: () => {
-    items.push({ others: true });
-    drawItems();
-  } });
   function drawItems() {
     // Detach the old rows first so their thumbnails can be reused.
     itemList.replaceChildren();
     itemList.replaceChildren(...items.map(itemRow));
     if (!items.length) itemList.append(h('li', { class: 'empty', text: 'No items yet. Add media or a record.' }));
-    othersBtn.disabled = items.some((i) => i.others);
+    checkDirty();
   }
   drawItems();
 
   const picker = searchList({
-    items: records.filter((r) => r.id !== id),
+    items: byName(records.filter((r) => r.id !== id)),
     text: (r) => r.name,
     placeholder: 'Find a record to add',
     empty: 'No other records yet.',
@@ -261,29 +260,42 @@ async function editor(view, id, params) {
     items,
     shuffle: Object.fromEntries(shuffles.map(([k, box]) => [k, box.checked])),
     repeat: repeat.value || null,
-    volume: readNum(volume),
+    volume_offset: readNum(volume),
     player: player.value || null,
     label: { title: opt(title), subtitle: opt(subtitle), artwork: opt(artwork) },
   });
 
   const save = h('button', { type: 'submit', class: 'primary', text: id ? 'Save' : 'Create' });
-  const form = h('form', { class: 'editor', onsubmit: (ev) => {
+  const remove = id && h('button', { type: 'button', class: 'danger', text: 'Delete', onclick: (ev) => {
+    const what = usedBy.length ? `${record.name} (used by ${plural(usedBy.length, 'record')})` : record.name;
+    if (!confirmDelete(what)) return;
+    run(ev.currentTarget, async () => {
+      await del(`api/records/${encodeURIComponent(id)}`);
+      saved = null;
+      toast(`Deleted ${record.name}`);
+      location.hash = '#/records';
+    });
+  } });
+  const form = h('form', { class: 'editor', oninput: checkDirty, onchange: checkDirty, onsubmit: (ev) => {
     ev.preventDefault();
     run(save, async () => {
       const body = collect();
-      const saved = id ? await put(`api/records/${encodeURIComponent(id)}`, body) : await post('api/records', body);
+      const done = id ? await put(`api/records/${encodeURIComponent(id)}`, body) : await post('api/records', body);
+      saved = null;
       // Records that list this one show its art too.
-      for (const r of [saved, ...usedBy]) bumpArt(r.id);
-      toast(`Saved ${saved.name}`);
-      const to = editURL(saved.id);
+      for (const r of [done, ...usedBy]) bumpArt(r.id);
+      toast(`Saved ${done.name}`);
+      const to = editURL(done.id);
       // Same id: the hash stays, so ask the router to reload the screen.
       if (location.hash === to) window.dispatchEvent(new HashChangeEvent('hashchange'));
       else location.hash = to;
     });
   } },
-  h('div', { class: 'toolbar' },
+  // Save and Delete stay in reach at the top while the page scrolls.
+  h('div', { class: 'toolbar sticky-top' },
     h('a', { href: '#/records', class: 'button', text: '← Records' }),
-    h('h1', { text: id ? record.name : 'New record' })),
+    h('h1', { text: id ? record.name : 'New record' }),
+    dirtyBadge, save, remove),
   h('div', { class: 'cols' },
     h('div', { class: 'stack' },
       field('Name', name, 'Matched against the HA tag name. Text after "|" is ignored.'),
@@ -293,47 +305,37 @@ async function editor(view, id, params) {
       usedBy.length > 0 && h('p', { class: 'muted small', text: `Used by ${plural(usedBy.length, 'record')}: ${usedBy.map((r) => r.name).join(', ')}.` }),
       h('fieldset', {}, h('legend', { text: 'Items' }),
         h('p', { class: 'muted small', text: 'Each play picks one item at random. A record item picks from its own items.' }),
-        itemList),
-      h('fieldset', {}, h('legend', { text: 'Playback' }),
-        h('div', { class: 'grid2' }, shuffles.map((s) => s[2])),
-        h('div', { class: 'grid2' },
-          field('Repeat', repeat),
-          field('Volume %', volume)),
-        field('Player', player)),
+        itemList,
+        field('Add media', h('div', { class: 'inline' }, media, h('button', { type: 'button', text: 'Add', onclick: addMedia })),
+          'An Apple Music or Spotify URL, "Artist — Album", or a name Music Assistant searches for.'),
+        h('div', { class: 'field picker' }, h('span', { text: 'Add a record' }), picker.el))),
+    h('div', { class: 'stack' },
       h('fieldset', {}, h('legend', { text: 'Label' }),
-        field('Title', title), field('Subtitle', subtitle),
+        id && h('div', { class: 'art-box' }, art,
+          h('button', { type: 'button', text: 'Refresh art', onclick: () => showArt(true) })),
         field('Artwork', artwork, 'Image URL or a path under the config dir.'),
         id && artPicker({
           path: `api/records/${encodeURIComponent(id)}/artwork/candidates`,
           input: artwork,
-          onPick: (preview) => { art.classList.remove('missing'); art.src = preview ? sized(preview, 400) : artURL(record, 400); },
-        }))),
-    h('div', { class: 'stack' },
-      id && h('div', { class: 'art-box' }, art,
-        h('button', { type: 'button', text: 'Refresh art', onclick: () => showArt(true) })),
-      h('fieldset', {}, h('legend', { text: 'Add media' }),
-        h('div', { class: 'inline' }, media, h('button', { type: 'button', text: 'Add', onclick: addMedia })),
-        h('p', { class: 'muted small', text: 'An Apple Music or Spotify URL, "Artist — Album", or a name Music Assistant searches for.' })),
-      h('fieldset', { class: 'picker' }, h('legend', { text: 'Add a record' }), picker.el, othersBtn),
+          onPick: (preview) => { art.classList.remove('missing'); art.src = preview ? sized(preview, 400) : artURL(record, 400); checkDirty(); },
+        }),
+        field('Title', title), field('Subtitle', subtitle)),
+      h('fieldset', {}, h('legend', { text: 'Playback' }),
+        h('div', { class: 'grid2' }, shuffles.map((s) => s[2])),
+        h('div', { class: 'grid2' },
+          field('Repeat', repeat),
+          field('Volume ±', volume, "Added to the room's volume, -100 to 100.")),
+        field('Player', player)),
       id && h('fieldset', {}, h('legend', { text: 'Test play' }), area,
         h('button', { type: 'button', text: 'Play', onclick: (ev) => run(ev.currentTarget, async () => {
           if (!area.value) throw new Error('Pick an area.');
           const r = await post(`api/records/${encodeURIComponent(id)}/play`, { area_id: area.value });
           toast(`Playing on ${r.player}`);
-        }) })))),
-  h('div', { class: 'actions' },
-    save,
-    id && h('button', { type: 'button', class: 'danger', text: 'Delete', onclick: (ev) => {
-      const what = usedBy.length ? `${record.name} (used by ${plural(usedBy.length, 'record')})` : record.name;
-      if (!confirmDelete(what)) return;
-      run(ev.currentTarget, async () => {
-        await del(`api/records/${encodeURIComponent(id)}`);
-        toast(`Deleted ${record.name}`);
-        location.hash = '#/records';
-      });
-    } })));
+        }) })))));
 
+  saved = JSON.stringify(collect());
+  window.addEventListener('beforeunload', onLeave);
   view.replaceChildren(form);
   if (!id) focusIfDesktop(name);
-  return picker.destroy;
+  return () => { picker.destroy(); window.removeEventListener('beforeunload', onLeave); };
 }

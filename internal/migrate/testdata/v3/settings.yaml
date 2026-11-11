@@ -1,0 +1,24 @@
+# Seed settings: the volumes and print calibration of the old automation and
+# bin/nfc-music-labels. Copy to <config_dir>/settings.yaml.
+version: 3
+readers:
+  integrations: [esphome]
+players:
+  default: [sonos, music_assistant]
+  fallback: true
+rooms:
+  default_volume: 15 # 1..100; 0 is read as unset and becomes 15
+  areas: # keyed by HA area_id
+    family_room: {volume: 30, sonos_entity: null, ma_entity: null}
+    office: {volume: 15, sonos_entity: null, ma_entity: null}
+    master_bathroom: {volume: 25, sonos_entity: null, ma_entity: null}
+    master_bedroom: {volume: 25, sonos_entity: null, ma_entity: null}
+  sonos_model_preference: [Arc, Five, One, Port]
+music_assistant:
+  config_entry_id: null
+print:
+  offsets: # mm, per template id; positive y moves the print up
+    avery-5260: {x: 0, y: -0.75}
+  inset_mm: 1.5
+  bleed_mm: 1.5
+  edge_bleed_mm: 0.4

@@ -1,0 +1,33 @@
+version: 3
+records:
+    - id: kenny
+      name: Kenny Rogers — 21 Number Ones
+      aliases: ['tag:kenny']
+      items:
+        - media: https://music.apple.com/us/album/21-number-ones/1
+      shuffle: {albums: null, artists: null, playlists: null, other: null}
+      repeat: one
+      volume_offset: null
+      player: sonos
+      label: {title: null, subtitle: null, artwork: art/kenny.jpg}
+    - id: kitchen
+      name: Kitchen
+      aliases: ['pool:kitchen', kitchen-old]
+      items:
+        - record: kenny
+        - media: Cat Stevens — Teaser and the Firecat
+        - media: Volodymyr Ivasiuk
+      shuffle: {albums: false, artists: true, playlists: null, other: null}
+      repeat: null
+      volume_offset: null
+      player: null
+      label: {title: null, subtitle: null, artwork: null}
+    - id: anything
+      name: Anything
+      aliases: []
+      items: []
+      shuffle: {albums: null, artists: null, playlists: null, other: null}
+      repeat: null
+      volume_offset: null
+      player: null
+      label: {title: null, subtitle: null, artwork: null}

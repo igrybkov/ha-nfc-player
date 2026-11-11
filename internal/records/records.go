@@ -234,8 +234,8 @@ func validate(r model.Record, all []model.Record, skip string) error {
 		return fmt.Errorf("%w: id must be lowercase letters, digits and \"-\", not %q", ErrInvalid, r.ID)
 	case r.Repeat != nil && !r.Repeat.Valid():
 		return fmt.Errorf("%w: repeat must be null, off, one or all, not %q", ErrInvalid, *r.Repeat)
-	case r.Volume != nil && (*r.Volume < 0 || *r.Volume > 100):
-		return fmt.Errorf("%w: volume must be 0..100, not %d", ErrInvalid, *r.Volume)
+	case r.VolumeOffset != nil && (*r.VolumeOffset < -100 || *r.VolumeOffset > 100):
+		return fmt.Errorf("%w: volume offset must be -100..100, not %d", ErrInvalid, *r.VolumeOffset)
 	}
 	key := model.NormalizeName(r.Name)
 	for _, o := range all {
@@ -256,14 +256,14 @@ func validate(r model.Record, all []model.Record, skip string) error {
 
 func validateItem(it model.RecordItem, all []model.Record, skip, self string) error {
 	set := 0
-	for _, b := range []bool{it.Media != "", it.Record != "", it.Others} {
+	for _, b := range []bool{it.Media != "", it.Record != ""} {
 		if b {
 			set++
 		}
 	}
 	switch {
 	case set != 1:
-		return errors.New("set exactly one of media, record and others")
+		return errors.New("set exactly one of media and record")
 	case it.Record == self || it.Record == skip && skip != "":
 		return errors.New("a record can't hold itself")
 	case it.Record != "":

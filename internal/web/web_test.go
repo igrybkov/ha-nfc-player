@@ -391,7 +391,7 @@ func TestRecordsCRUD(t *testing.T) {
 	wantJSONError(t, e.do(t, "POST", "/api/records", "{not json"), http.StatusBadRequest)
 	wantJSONError(t, e.do(t, "POST", "/api/records", map[string]any{"id": created.ID, "name": "Other"}), http.StatusConflict)
 
-	mix := e.mustCreate(t, model.Record{Name: "Mix", Items: []model.RecordItem{{Record: created.ID}, {Others: true}}})
+	mix := e.mustCreate(t, model.Record{Name: "Mix", Items: []model.RecordItem{{Record: created.ID}}})
 
 	w = e.do(t, "GET", "/api/records", nil)
 	wantStatus(t, w, http.StatusOK)
@@ -399,11 +399,11 @@ func TestRecordsCRUD(t *testing.T) {
 		t.Fatalf("list %+v", list)
 	}
 
-	vol := 30
-	created.Volume = &vol
+	vol := -10
+	created.VolumeOffset = &vol
 	w = e.do(t, "PUT", "/api/records/metallica-essential", created)
 	wantStatus(t, w, http.StatusOK)
-	if got := decode[model.Record](t, w); got.Volume == nil || *got.Volume != 30 {
+	if got := decode[model.Record](t, w); got.VolumeOffset == nil || *got.VolumeOffset != -10 {
 		t.Fatalf("updated %+v", got)
 	}
 	created.ID = ""
@@ -1226,7 +1226,7 @@ func TestArtPicker(t *testing.T) {
 	b := e.mustCreate(t, model.Record{Name: "B", Items: media("apple_music://album/2"), Label: model.LabelOverrides{Artwork: &file}})
 	empty := e.mustCreate(t, model.Record{Name: "Empty"})
 	mix := e.mustCreate(t, model.Record{Name: "Mix", Items: []model.RecordItem{
-		{Record: a.ID}, {Record: b.ID}, {Record: empty.ID}, {Media: "Some name"}, {Media: "apple_music://album/1"}, {Media: "apple_music://album/3"}, {Others: true},
+		{Record: a.ID}, {Record: b.ID}, {Record: empty.ID}, {Media: "Some name"}, {Media: "apple_music://album/1"}, {Media: "apple_music://album/3"},
 	}})
 
 	// One link: its candidates, paged, looked up under the record's name.

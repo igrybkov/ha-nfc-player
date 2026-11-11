@@ -320,7 +320,8 @@ type job struct {
 type layer struct {
 	shuffle *bool
 	repeat  *model.Repeat
-	volume  *int
+	volume  *int // absolute, percent
+	offset  *int // added to the area volume, when volume is unset
 	player  *string
 }
 
@@ -332,7 +333,7 @@ func commandLayer(c model.PlayCommand) layer {
 // pick went down to. Its shuffle depends on the kind of media picked.
 func recordLayer(r model.Record, kind string) layer {
 	shuffle := r.Shuffle.For(kind)
-	return layer{shuffle: &shuffle, repeat: r.Repeat, volume: r.Volume, player: r.Player}
+	return layer{shuffle: &shuffle, repeat: r.Repeat, offset: r.VolumeOffset, player: r.Player}
 }
 
 // commandJob resolves the first non-empty of Media, Record, Tag and Pool.
@@ -411,6 +412,7 @@ func (h *Handler) playJob(ctx context.Context, a rooms.Area, j job, radio bool) 
 		st.shuffle = firstSet(st.shuffle, l.shuffle)
 		st.repeat = firstSet(st.repeat, l.repeat)
 		st.volume = firstSet(st.volume, l.volume)
+		st.offset = firstSet(st.offset, l.offset)
 		st.player = firstSet(st.player, l.player)
 	}
 	req := player.Request{Media: j.media, Query: j.query, Area: a, Volume: a.Volume, Repeat: string(model.RepeatAll), Radio: radio}
@@ -420,8 +422,11 @@ func (h *Handler) playJob(ctx context.Context, a rooms.Area, j job, radio bool) 
 	if st.repeat != nil {
 		req.Repeat = string(*st.repeat)
 	}
-	if st.volume != nil {
+	switch {
+	case st.volume != nil:
 		req.Volume = *st.volume
+	case st.offset != nil:
+		req.Volume += *st.offset
 	}
 	req.Volume = min(max(req.Volume, 0), 100)
 	var override string
