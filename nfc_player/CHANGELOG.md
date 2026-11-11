@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Pick the default background on the Backgrounds screen (**Make default**).
+  The Print screen starts with it.
+
 ## 0.3.0
 
 - Spotify: tags, pools and play events take Spotify links

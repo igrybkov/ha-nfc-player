@@ -120,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/print/preview", s.printPreview)
 	mux.HandleFunc("POST /api/print/pdf", s.printPDF)
 	mux.HandleFunc("PUT /api/print/offsets/{template}", s.saveOffset)
+	mux.HandleFunc("PUT /api/print/default-background/{id}", s.setDefaultBackground)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint")

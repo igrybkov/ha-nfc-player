@@ -136,7 +136,13 @@ type PrintSettings struct {
 	InsetMM     float64           `yaml:"inset_mm" json:"inset_mm"`
 	BleedMM     float64           `yaml:"bleed_mm" json:"bleed_mm"`
 	EdgeBleedMM float64           `yaml:"edge_bleed_mm" json:"edge_bleed_mm"`
+	// DefaultBackground is the background id a print starts with; "" or an
+	// id that no longer exists means DefaultBackgroundID.
+	DefaultBackground string `yaml:"default_background" json:"default_background"`
 }
+
+// DefaultBackgroundID is the background used when none is chosen.
+const DefaultBackgroundID = "white"
 
 // Offset shifts the print, in mm. Positive Y moves the print up.
 type Offset struct {

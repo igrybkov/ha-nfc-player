@@ -1038,3 +1038,35 @@ func TestPDFNames(t *testing.T) {
 		t.Errorf("hashes: order %s/%s, copies %s, same %s", h1, h2, h3, h4)
 	}
 }
+
+func TestDefaultBackground(t *testing.T) {
+	e := newEnv(t, false)
+	a := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1"})
+	print := func() string {
+		t.Helper()
+		w := e.do(t, "POST", "/api/print/pdf", printRequest{EntryIDs: []string{a.ID}, TemplateID: "avery-5260"})
+		wantStatus(t, w, http.StatusOK)
+		return e.lbl.lastJob(t).Background.ID
+	}
+	if got := print(); got != model.DefaultBackgroundID {
+		t.Fatalf("no default: background %q, want white", got)
+	}
+
+	wantStatus(t, e.do(t, "PUT", "/api/print/default-background/nope", nil), http.StatusNotFound)
+	w := e.do(t, "PUT", "/api/print/default-background/black", nil)
+	wantStatus(t, w, http.StatusOK)
+	if got := e.settings.Settings().Print.DefaultBackground; got != "black" {
+		t.Fatalf("saved default %q", got)
+	}
+	if got := print(); got != "black" {
+		t.Errorf("background %q, want the default black", got)
+	}
+
+	// A default that no longer exists falls back to white.
+	if err := e.settings.Update(func(v *model.Settings) error { v.Print.DefaultBackground = "deleted"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := print(); got != model.DefaultBackgroundID {
+		t.Errorf("deleted default: background %q, want white", got)
+	}
+}

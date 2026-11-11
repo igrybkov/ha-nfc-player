@@ -90,7 +90,8 @@ Content-Security-Policy and can only be framed by Home Assistant itself.
   its result and error.
 - **Print**: make a label PDF (see below).
 - **Templates** and **Backgrounds**: the built-ins are read-only. Duplicate
-  one to make your own.
+  one to make your own. **Make default** on a background makes the Print
+  screen start with it (white until you pick one).
 - **Settings**: default volume (1 to 100), per-area volume (0 to 100), Sonos
   and Music Assistant entity per area, player order and fallback, reader
   integrations, print inset and bleed.

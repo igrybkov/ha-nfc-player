@@ -190,11 +190,7 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 		return job, nil, badRequest("template_id or template is required")
 	}
 
-	bgID := req.BackgroundID
-	if bgID == "" {
-		bgID = "white"
-	}
-	bg, err := s.deps.Backgrounds.Get(bgID)
+	bg, err := s.background(req.BackgroundID)
 	if err != nil {
 		return job, nil, err
 	}
@@ -287,6 +283,20 @@ func (s *Server) fetchArt(ctx context.Context, entries []model.Entry) []image.Im
 	}
 	wg.Wait()
 	return art
+}
+
+// background returns the background id names. An empty id means the
+// default from settings, or DefaultBackgroundID when that one was deleted.
+func (s *Server) background(id string) (labels.Background, error) {
+	if id != "" {
+		return s.deps.Backgrounds.Get(id)
+	}
+	if def := s.deps.Settings.Settings().Print.DefaultBackground; def != "" {
+		if bg, err := s.deps.Backgrounds.Get(def); err == nil {
+			return bg, nil
+		}
+	}
+	return s.deps.Backgrounds.Get(model.DefaultBackgroundID)
 }
 
 // pdfNameLen is the most characters of label titles in a PDF file name, and

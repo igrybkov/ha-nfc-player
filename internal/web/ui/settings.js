@@ -80,7 +80,8 @@ export async function render(view) {
       players: { default: chain, fallback: fallback.checked },
       rooms: { default_volume: readNum(defaultVolume) ?? 0, areas: areasOut, sonos_model_preference: list(sonosPref.value) },
       music_assistant: { config_entry_id: maEntry.value.trim() || null },
-      print: { offsets, inset_mm: readNum(inset) ?? 0, bleed_mm: readNum(bleed) ?? 0, edge_bleed_mm: readNum(edge) ?? 0 },
+      // default_background is set on the Backgrounds screen; keep it.
+      print: { ...s.print, offsets, inset_mm: readNum(inset) ?? 0, bleed_mm: readNum(bleed) ?? 0, edge_bleed_mm: readNum(edge) ?? 0 },
     };
   };
 

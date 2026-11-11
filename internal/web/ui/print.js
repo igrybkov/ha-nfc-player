@@ -4,7 +4,8 @@ import {
 } from './lib.js';
 
 // Kept across visits so a half-done print setup survives a detour.
-const state = { selected: [], template: '', background: 'white', copies: 1, row: 1, col: 1, skip: 0 };
+// background '' = the default background from settings.
+const state = { selected: [], template: '', background: '', copies: 1, row: 1, col: 1, skip: 0 };
 
 export async function render(view) {
   const [entries, templates, backgrounds, settings] = await Promise.all([
@@ -13,7 +14,10 @@ export async function render(view) {
   const byID = new Map(entries.map((e) => [e.id, e]));
   state.selected = state.selected.filter((id) => byID.has(id));
   if (!templates.some((t) => t.id === state.template)) state.template = templates[0]?.id ?? '';
-  if (!backgrounds.some((b) => b.id === state.background)) state.background = backgrounds[0]?.id ?? '';
+  if (!backgrounds.some((b) => b.id === state.background)) {
+    const def = settings.print.default_background;
+    state.background = (backgrounds.find((b) => b.id === def) ?? backgrounds.find((b) => b.id === 'white') ?? backgrounds[0])?.id ?? '';
+  }
   const tpl = () => templates.find((t) => t.id === state.template);
 
   // Entry picker.

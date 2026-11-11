@@ -2,7 +2,7 @@
 import { h, get, post, put, del, toast, run, field, confirmDelete } from './lib.js';
 
 export async function render(view, rest, params) {
-  const all = await get('api/backgrounds');
+  const [all, settings] = await Promise.all([get('api/backgrounds'), get('api/settings')]);
   if (rest[0] === 'edit' && rest[1]) return editor(view, all.find((b) => b.id === rest[1]), false);
   if (rest[0] === 'new') {
     const from = all.find((b) => b.id === params.get('from'));
@@ -11,6 +11,14 @@ export async function render(view, rest, params) {
       : { id: '', name: '', builtin: false, background: '#1E3A5F', text: '#FFFFFF', fade: null, fade_text: null };
     return editor(view, b, true);
   }
+  // The background prints start with; a deleted one falls back to white.
+  const saved = settings.print.default_background;
+  const def = all.some((b) => b.id === saved) ? saved : 'white';
+  const makeDefault = (b) => (ev) => run(ev.currentTarget, async () => {
+    await put(`api/print/default-background/${encodeURIComponent(b.id)}`, {});
+    toast(`${b.name} is the default background`);
+    await render(view, rest, params);
+  });
   view.replaceChildren(
     h('div', { class: 'toolbar' }, h('h1', { text: 'Backgrounds' }),
       h('a', { class: 'button primary', href: '#/backgrounds/new', text: 'New background' })),
@@ -19,7 +27,9 @@ export async function render(view, rest, params) {
         sample(b, true),
         h('div', { class: 'grow' },
           h('a', { class: 'title', href: `#/backgrounds/edit/${encodeURIComponent(b.id)}`, text: b.name }),
-          h('div', { class: 'muted small' }, b.id, b.builtin && h('span', { class: 'badge', text: 'built-in' }))),
+          h('div', { class: 'muted small' }, b.id, b.builtin && h('span', { class: 'badge', text: 'built-in' }),
+            b.id === def && h('span', { class: 'badge', text: 'default' }))),
+        b.id !== def && h('button', { type: 'button', text: 'Make default', onclick: makeDefault(b) }),
         h('a', { class: 'button', href: `#/backgrounds/new?from=${encodeURIComponent(b.id)}`, text: 'Duplicate' }))))),
   );
 }

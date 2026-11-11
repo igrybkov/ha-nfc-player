@@ -120,6 +120,24 @@ func (s *Server) saveOffset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, o)
 }
 
+// setDefaultBackground makes a background the one prints start with.
+func (s *Server) setDefaultBackground(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.deps.Backgrounds.Get(id); err != nil {
+		s.writeErr(w, r, err)
+		return
+	}
+	err := s.deps.Settings.Update(func(v *model.Settings) error {
+		v.Print.DefaultBackground = id
+		return nil
+	})
+	if err != nil {
+		s.writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"default_background": id})
+}
+
 func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 	all, err := s.deps.Templates.List()
 	if err != nil {
