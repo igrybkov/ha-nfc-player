@@ -140,6 +140,9 @@ Open Font License (`assets/fonts/OFL.txt`).
 
 Renovate (`renovate.json`) opens update PRs on Monday mornings, for Go
 modules, the Docker base images and GitHub Actions. It waits 3 days after
-a release before it proposes it. Minor, patch and digest updates merge by
-themselves once CI passes; major updates wait for review. A merged update
-doesn't release: bump the version for that.
+a release before it proposes it. GitHub Actions wait 7 days. Renovate
+creates no branch until that wait is over. An update with no release date
+waits forever; you can force it from the Dependency Dashboard. Minor, patch
+and digest updates for Go and Docker merge by themselves once CI passes.
+Major updates and all GitHub Actions updates wait for review. A merged
+update doesn't release: bump the version for that.
