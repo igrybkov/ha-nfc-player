@@ -175,7 +175,7 @@ func decodedJPEGSquare() image.Image {
 var pageObject = regexp.MustCompile(`/Type\s*/Page[^s]`)
 
 // checkPDF does a light structural check (no PDF parser dependency): header,
-// trailer, and the number of page objects.
+// trailer, xref, full fonts and the number of page objects.
 func checkPDF(t *testing.T, data []byte, wantPages int) {
 	t.Helper()
 	if !bytes.HasPrefix(data, []byte("%PDF-")) {
@@ -190,6 +190,7 @@ func checkPDF(t *testing.T, data []byte, wantPages int) {
 	if got := len(pageObject.FindAll(data, -1)); got != wantPages {
 		t.Errorf("pages = %d, want %d", got, wantPages)
 	}
+	checkFullFonts(t, data)
 }
 
 // writePDF renders the job into dir and, when LABELS_PREVIEW_DIR is set,

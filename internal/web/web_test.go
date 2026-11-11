@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -826,7 +827,8 @@ func TestPrintPDF(t *testing.T) {
 	if !strings.HasPrefix(w.Body.String(), "%PDF") {
 		t.Fatalf("body %q", w.Body.String())
 	}
-	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="labels-avery-5260.pdf"`) {
+	// Titles in print order (the override, then the name's artist part).
+	if cd := w.Header().Get("Content-Disposition"); !regexp.MustCompile(`^inline; filename="custom-title-no-art-[a-z2-7]{8}\.pdf"; filename\*=UTF-8''custom-title-no-art-[a-z2-7]{8}\.pdf$`).MatchString(cd) {
 		t.Fatalf("disposition %q", cd)
 	}
 	job := e.lbl.lastJob(t)
@@ -961,4 +963,73 @@ func TestSupervisorClientFilter(t *testing.T) {
 	// Outside Supervisor (dev mode) any client is accepted.
 	dev := newEnv(t, false)
 	wantStatus(t, dev.do(t, "GET", "/api/tags", nil, remote("192.168.1.10:1")), http.StatusOK)
+}
+
+func TestPDFNames(t *testing.T) {
+	job := func(titles ...string) labels.Job {
+		j := labels.Job{Template: labels.Template{ID: "avery-5260"}, Background: labels.Background{ID: "black"}, Copies: 1, StartRow: 1, StartCol: 1}
+		for _, title := range titles {
+			j.Items = append(j.Items, labels.Item{Title: title})
+		}
+		return j
+	}
+	hashed := regexp.MustCompile(`^(.*)-([a-z2-7]{8})$`)
+	split := func(name string) (string, string) {
+		m := hashed.FindStringSubmatch(name)
+		if m == nil {
+			t.Fatalf("name %q has no hash", name)
+		}
+		return m[1], m[2]
+	}
+
+	// Each title gets its share of 35 characters, at least 8.
+	for _, c := range []struct {
+		titles []string
+		want   string
+	}{
+		{[]string{"Five Finger Death Punch"}, "five-finger-death-punch"},
+		{[]string{"Five Finger Death Punch", "The Rasmus"}, "five-finger-death-the-rasmus"},
+		{[]string{"Five Finger Death Punch", "The Rasmus", "Disturbed"}, "five-finger-the-rasmus-disturbed"},
+		{[]string{"Five Finger Death Punch", "The Rasmus", "Disturbed", "Linkin Park"}, "five-fin-the-rasm-disturbe-linkin-p"},
+		{[]string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S"}, "a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r"},
+	} {
+		ascii, _ := pdfNames(job(c.titles...), c.titles)
+		if got, _ := split(ascii); got != c.want {
+			t.Errorf("%q: name = %q, want %q", c.titles, got, c.want)
+		}
+	}
+
+	ascii, utf := pdfNames(job("The Rasmus", "Disturbed"), []string{"a", "b"})
+	if ascii != utf {
+		t.Errorf("utf %q != ascii %q for Latin titles", utf, ascii)
+	}
+
+	// Cyrillic stays in the UTF-8 name only; a cut never leaves a trailing dash.
+	ascii, utf = pdfNames(job("Володимир Івасюк", "AC/DC"), []string{"a", "b"})
+	if got, _ := split(ascii); got != "ac-dc" {
+		t.Errorf("ascii = %q", ascii)
+	}
+	if got, _ := split(utf); got != "володимир-івасюк-ac-dc" {
+		t.Errorf("utf = %q", utf)
+	}
+	if got, _ := split(func() string { a, _ := pdfNames(job("Мова"), []string{"a"}); return a }()); got != "labels" {
+		t.Errorf("all non-ASCII: ascii = %q, want labels", got)
+	}
+	if got, _ := split(func() string {
+		a, _ := pdfNames(job("abcdefghij-klmnopqrst-uvwxyz-abcde-fghi"), []string{"a"})
+		return a
+	}()); strings.HasSuffix(got, "-") || len(got) > pdfNameLen {
+		t.Errorf("cut name %q", got)
+	}
+
+	// The hash follows the order and the settings.
+	_, h1 := split(func() string { a, _ := pdfNames(job("A", "B"), []string{"a", "b"}); return a }())
+	_, h2 := split(func() string { a, _ := pdfNames(job("B", "A"), []string{"b", "a"}); return a }())
+	j := job("A", "B")
+	j.Copies = 2
+	_, h3 := split(func() string { a, _ := pdfNames(j, []string{"a", "b"}); return a }())
+	_, h4 := split(func() string { a, _ := pdfNames(job("A", "B"), []string{"a", "b"}); return a }())
+	if h1 == h2 || h1 == h3 || h1 != h4 {
+		t.Errorf("hashes: order %s/%s, copies %s, same %s", h1, h2, h3, h4)
+	}
 }

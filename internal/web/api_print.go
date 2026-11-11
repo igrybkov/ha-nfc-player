@@ -3,13 +3,17 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base32"
 	"fmt"
 	"image"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
@@ -137,7 +141,8 @@ func (s *Server) printPDF(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(missingArtHeader, strconv.Itoa(len(missingArt(entries, art))))
 	}
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="labels-%s.pdf"`, safeFilename(job.Template.ID)))
+	ascii, utf := pdfNames(job, req.EntryIDs)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.pdf"; filename*=UTF-8''%s.pdf`, ascii, url.PathEscape(utf)))
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(buf.Bytes())
 }
@@ -283,12 +288,80 @@ func (s *Server) fetchArt(ctx context.Context, entries []model.Entry) []image.Im
 	return art
 }
 
-// safeFilename keeps a template id usable in a Content-Disposition header.
-func safeFilename(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			return r
+// pdfNameLen is the most characters of label titles in a PDF file name, and
+// pdfTitleMin the least one title is cut to, so a long name doesn't crowd out
+// the others.
+const (
+	pdfNameLen  = 35
+	pdfTitleMin = 8
+)
+
+// pdfNames returns the PDF file name without ".pdf", in ASCII and in UTF-8:
+// the label titles in print order, slugged, each cut to its share of
+// pdfNameLen (at least pdfTitleMin), joined and cut to pdfNameLen,
+// then an 8-character hash of the entries and the print settings, so two
+// different runs of the same labels get different names. The ASCII name drops
+// letters outside a-z (a Cyrillic title vanishes); "labels" stands in when
+// nothing is left.
+func pdfNames(job labels.Job, entryIDs []string) (ascii, utf string) {
+	var titles []string
+	for _, it := range job.Items {
+		titles = append(titles, it.Title)
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "%q|%q|%s|%s|%d|%d|%d|%d|%g|%g|%t",
+		entryIDs, titles, job.Template.ID, job.Background.ID, job.Copies,
+		job.StartRow, job.StartCol, job.Skip, job.Offset.XMM, job.Offset.YMM, job.Outline)
+	hash := strings.ToLower(base32.StdEncoding.EncodeToString(h.Sum(nil)))[:8]
+
+	name := func(keep func(rune) bool) string {
+		var parts []string
+		for _, t := range titles {
+			if s := slugKeep(t, keep); s != "" {
+				parts = append(parts, s)
+			}
 		}
-		return '_'
-	}, s)
+		share := pdfNameLen
+		if n := len(parts); n > 1 {
+			share = max(pdfTitleMin, (pdfNameLen-(n-1))/n) // n-1 dashes between them
+		}
+		for i, p := range parts {
+			parts[i] = cutRunes(p, share)
+		}
+		joined := cutRunes(strings.Join(parts, "-"), pdfNameLen)
+		if joined == "" {
+			joined = "labels"
+		}
+		return joined + "-" + hash
+	}
+	ascii = name(func(r rune) bool { return r < unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) })
+	utf = name(func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) })
+	return ascii, utf
+}
+
+// cutRunes cuts s to at most n runes and drops dashes left at the end.
+func cutRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		s = string(r[:n])
+	}
+	return strings.TrimRight(s, "-")
+}
+
+// slugKeep lower-cases s, keeps the runes keep accepts and turns every run of
+// other runes into one "-".
+func slugKeep(s string, keep func(rune) bool) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		if !keep(r) {
+			dash = true
+			continue
+		}
+		if dash && b.Len() > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteRune(r)
+		dash = false
+	}
+	return b.String()
 }

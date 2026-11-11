@@ -86,7 +86,19 @@ func Render(w io.Writer, job Job) error {
 			}
 		}
 	}
-	if _, err := c.pdf.WriteTo(w); err != nil {
+	var raw bytes.Buffer
+	if _, err := c.pdf.WriteTo(&raw); err != nil {
+		return fmt.Errorf("write pdf: %w", err)
+	}
+	fonts, err := fullFonts()
+	if err != nil {
+		return err
+	}
+	out, err := embedFullFonts(raw.Bytes(), fonts)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(out); err != nil {
 		return fmt.Errorf("write pdf: %w", err)
 	}
 	return nil
@@ -95,6 +107,8 @@ func Render(w io.Writer, job Job) error {
 // pdfCanvas implements Canvas on gopdf. Fonts come from assets.Fonts.
 //
 // gopdf notes:
+//   - gopdf embeds font subsets that some printers drop without a word.
+//     Render swaps in the full fonts after gopdf writes; see fontembed.go.
 //   - ImageFrom re-encodes to PNG and failed on a decoded JPEG (*image.YCbCr,
 //     "16-bit depth not supported"). Image encodes JPEG and passes the bytes
 //     through gopdf.ImageHolderByBytes instead (DCT passthrough, much smaller
@@ -117,10 +131,7 @@ func newPDFCanvas(page Size) (*pdfCanvas, error) {
 		Unit:     gopdf.UnitPT,
 		PageSize: gopdf.Rect{W: page.WidthIn * PointsPerInch, H: page.HeightIn * PointsPerInch},
 	})
-	for alias, file := range map[string]string{
-		fontRegularAlias: "fonts/NotoSans-Regular.ttf",
-		fontBoldAlias:    "fonts/NotoSans-Bold.ttf",
-	} {
+	for alias, file := range fontFiles {
 		data, err := assets.Fonts.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("font %s: %w", file, err)

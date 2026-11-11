@@ -558,6 +558,8 @@ Port these rules exactly. The Python script is the reference; copy it into
   Labels flow across columns then down rows, onto new pages as needed.
 - Fonts: embedded Noto Sans Regular and Bold (OFL), Cyrillic required.
   Check that `Володимир Івасюк` renders.
+  Embed the complete font files: gopdf's subsets lack cmap, OS/2, name and
+  post, and an HP LaserJet printed 0 pages from them (`fontembed.go`).
 
 Artwork resolution chain (port from the script):
 1. Album URL: iTunes lookup by id, replace `/NNNxNNNbb.` with
