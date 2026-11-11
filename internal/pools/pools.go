@@ -75,6 +75,23 @@ func (s *Store) Pool(id string) (model.Pool, bool) {
 	return p, err == nil
 }
 
+// ByName finds a pool by normalized name or id, for scans of tags that have
+// no entry. A stored pool wins over the built-in "all".
+func (s *Store) ByName(name string) (model.Pool, bool) {
+	if name == "" {
+		return model.Pool{}, false
+	}
+	for _, p := range s.pools() {
+		if model.NormalizeName(p.Name) == name || p.ID == name {
+			return p, true
+		}
+	}
+	if name == model.NormalizeName(AllName) || name == model.PoolAll {
+		return s.all(), true
+	}
+	return model.Pool{}, false
+}
+
 func (s *Store) all() model.Pool {
 	p := model.Pool{ID: model.PoolAll, Name: AllName, Items: []model.PoolItem{}}
 	for _, e := range s.entries.All() {

@@ -295,6 +295,16 @@ func (h *Handler) handle(ctx context.Context, item queued) {
 		h.recordPlay(s, name, err)
 		return
 	}
+	if p, ok := h.poolByName(s.TagName); ok {
+		// A tag named like a pool plays it, as a tag set to that pool would.
+		name, j, err := h.playEntry(ctx, model.Entry{Name: s.TagName, Pool: p.ID}, s.AreaID)
+		s.PoolID, s.Media = p.ID, j.text
+		if j.entryID != "" {
+			s.Media = j.entryID
+		}
+		h.recordPlay(s, name, err)
+		return
+	}
 	q, ok := ParseQuery(s.TagName)
 	if !ok {
 		h.record(s, model.ScanNoMatch, "", nil)
@@ -306,6 +316,14 @@ func (h *Handler) handle(ctx context.Context, item queued) {
 		return
 	}
 	h.recordPlay(s, name, err)
+}
+
+// poolByName finds the pool a tag name names, if any.
+func (h *Handler) poolByName(tagName string) (model.Pool, bool) {
+	if h.deps.Pools == nil {
+		return model.Pool{}, false
+	}
+	return h.deps.Pools.ByName(model.NormalizeName(tagName))
 }
 
 // match finds the entry: tag ID first, then normalized name.

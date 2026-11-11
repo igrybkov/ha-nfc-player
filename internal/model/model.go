@@ -282,6 +282,9 @@ type PlayResult struct {
 // Implemented by pools (track A).
 type PoolLookup interface {
 	Pool(id string) (Pool, bool) // PoolAll included
+	// ByName finds a pool whose name or id, normalized (NormalizeName),
+	// equals name. name is already normalized. PoolAll included.
+	ByName(name string) (Pool, bool)
 }
 
 // AreaInfo is an HA area with its resolved players and volume.

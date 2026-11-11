@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- A scanned tag with no entry plays the pool its name matches (name or id,
+  cut at "|", any case). "All tags" plays a random tag.
+
 ## 0.2.1
 
 - Shuffle on an artist tag now starts with a random song. Sonos always

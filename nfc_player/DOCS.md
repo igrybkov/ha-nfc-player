@@ -12,11 +12,14 @@ them.
 2. The app finds the tag in its registry. It matches by linked tag ID first,
    then by tag name. The name is cut at the first `|` and compared without
    case, so `Metallica — Essential | v2` finds `Metallica — Essential`.
-3. A name like `Artist — Album` with no entry is searched in Music Assistant,
+3. A tag with no entry whose name matches a pool's name or id plays that
+   pool. The name is matched the same way, so `Kitchen | fridge card` plays
+   the Kitchen pool, and `All tags` plays a random tag.
+4. A name like `Artist — Album` with no entry is searched in Music Assistant,
    and the first Apple Music album or playlist plays.
-4. It finds the speaker in the reader's area and plays the music there.
+5. It finds the speaker in the reader's area and plays the music there.
    Sonos speakers play natively. Music Assistant is the fallback.
-5. Volume: the tag's volume, else the area's, else the default volume.
+6. Volume: the tag's volume, else the area's, else the default volume.
 
 ## Setup
 
@@ -122,6 +125,10 @@ A tag can play a pool instead of a URL. In the tag editor, set **Plays** to
 item. The tag's volume and player beat the pool's. Shuffle and repeat come
 from the pool and the item. The label art is the art of the pool's first
 item that has a link.
+
+You can also skip the editor: name the tag in HA after the pool (see
+**How it works** above). A tag entry with the same name wins over the
+pool.
 
 A pool tag that names a pool you deleted fails when you scan it. The error
 shows in **All recent scans**.

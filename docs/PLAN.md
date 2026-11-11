@@ -765,6 +765,9 @@ pools:
   Player (non-nil) beat the pool's; entry Shuffle/Repeat are ignored.
 - No nesting: a pool item that is a tag with a pool fails at play time
   ("nested pool"); `all` skips pool entries when picking.
+- Name match (0.2.2): a scanned tag with no entry whose normalized name
+  equals a pool's normalized name or id plays that pool (PoolLookup.ByName),
+  before the "Artist — Album" search. "All tags" / "all" is PoolAll.
 - Artwork: `pools.Artwork` wraps the ArtworkSource. For an entry with a
   pool and no `label.artwork`, it uses the art of the pool's first item
   that has a URL (a tag item's entry URL, or a media URL that parses).

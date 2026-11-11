@@ -73,6 +73,15 @@ func (m poolMap) Pool(id string) (model.Pool, bool) {
 	return p, ok
 }
 
+func (m poolMap) ByName(name string) (model.Pool, bool) {
+	for _, p := range m {
+		if model.NormalizeName(p.Name) == name || p.ID == name {
+			return p, true
+		}
+	}
+	return model.Pool{}, false
+}
+
 var testPools = poolMap{
 	// Settings: shuffle from the item, repeat one, volume 40.
 	"kitchen": {ID: "kitchen", Name: "Kitchen", Repeat: ptr(model.RepeatOne), Volume: ptr(40), Items: []model.PoolItem{
@@ -81,6 +90,7 @@ var testPools = poolMap{
 	"nested":  {ID: "nested", Name: "Nested", Items: []model.PoolItem{{Tag: "kitchen-tag"}}},
 	"missing": {ID: "missing", Name: "Missing", Items: []model.PoolItem{{Tag: "deleted"}}},
 	"empty":   {ID: "empty", Name: "Empty", Items: []model.PoolItem{}},
+	"party":   {ID: "party", Name: "Party Mix", Volume: ptr(40), Items: []model.PoolItem{{Media: queenURL}}},
 }
 
 func fakeHA() *hatest.Fake {
@@ -601,5 +611,23 @@ func TestScanAreaLookupTimeout(t *testing.T) {
 		if s.Result != model.ScanError || !strings.Contains(s.Error, "deadline") {
 			t.Errorf("scan = %+v, want an area lookup timeout", s)
 		}
+	}
+}
+
+// A tag with no entry, named like a pool, plays that pool with the pool's
+// settings. The name is matched as tag names are: cut at "|", no case.
+func TestScanPlaysPoolByName(t *testing.T) {
+	hs := start(t, fakeHA())
+	hs.scan("tag-new", " PARTY mix | fridge card", "reader-fr")
+	s := hs.waitScans(t, 1)[0]
+	if s.Result != model.ScanPlayed || s.PoolID != "party" || s.EntryID != "" || s.Media != queenURL {
+		t.Fatalf("scan = %+v", s)
+	}
+	calls := hs.f.ServiceCalls()
+	if pm := playMedia(calls); len(pm) != 1 || pm[0].Data["media_content_id"] != queenURL {
+		t.Fatalf("play_media = %+v", pm)
+	}
+	if v := volumeOf(t, calls); v != 0.40 {
+		t.Errorf("volume = %v, want pool volume 0.40", v)
 	}
 }

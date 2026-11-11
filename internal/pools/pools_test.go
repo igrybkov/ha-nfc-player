@@ -293,3 +293,22 @@ func TestArtwork(t *testing.T) {
 		}
 	}
 }
+
+func TestByName(t *testing.T) {
+	s, _ := newStore(t)
+	if _, err := s.Create(kitchen()); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"kitchen":  "kitchen", // name and id
+		"all tags": model.PoolAll,
+		"all":      model.PoolAll,
+		"office":   "",
+		"":         "",
+	} {
+		p, ok := s.ByName(name)
+		if ok != (want != "") || p.ID != want {
+			t.Errorf("ByName(%q) = %q, %v; want %q", name, p.ID, ok, want)
+		}
+	}
+}
