@@ -40,9 +40,11 @@ func New(c ha.Client, s model.SettingsSource) *Player { return &Player{ha: c, se
 
 func (p *Player) Name() string { return "music_assistant" }
 
-// Supports every Apple Music kind and Query, in an area with an MA entity.
+// Supports every Apple Music kind but stations, and Query, in an area with
+// an MA entity. MA's Apple Music provider can't play stations (it raises
+// NotImplementedError), so a station is left to Sonos.
 func (p *Player) Supports(req player.Request) bool {
-	if req.Area.MAEntity == "" {
+	if req.Area.MAEntity == "" || req.Media.Kind == catalog.KindStation {
 		return false
 	}
 	return req.Query != nil || req.Media.URI() != ""

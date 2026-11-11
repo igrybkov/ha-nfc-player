@@ -8,7 +8,7 @@ runs on `amd64` and `aarch64`.
 
 ## Features
 
-- Scan a tag, and its album, playlist, song or artist plays in the room of
+- Scan a tag, and its album, playlist, song, artist or station plays in the room of
   the tag reader.
 - Native Sonos playback from Apple Music links. Music Assistant is the
   fallback.

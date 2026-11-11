@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,8 @@ type Song struct {
 	Artist  string
 	URL     string // https://music.apple.com/us/song/track/<TrackID>
 }
+
+var stationID = regexp.MustCompile(`^ra\.[A-Za-z0-9._-]+$`)
 
 var appleHosts = map[string]bool{
 	"music.apple.com":     true,
@@ -151,8 +154,9 @@ func checkID(m Media) error {
 			return fmt.Errorf("playlist id %q does not start with \"pl.\"", m.ID)
 		}
 	case KindStation:
-		if !strings.HasPrefix(m.ID, "ra.") {
-			return fmt.Errorf("station id %q does not start with \"ra.\"", m.ID)
+		// The id goes into a Sonos URI as is, so it must be plain.
+		if !stationID.MatchString(m.ID) {
+			return fmt.Errorf("station id %q is not \"ra.\" and letters, digits, \".\", \"_\" or \"-\"", m.ID)
 		}
 	}
 	return nil

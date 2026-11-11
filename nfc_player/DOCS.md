@@ -19,6 +19,8 @@ them.
    and the first Apple Music album or playlist plays.
 5. It finds the speaker in the reader's area and plays the music there.
    Sonos speakers play natively. Music Assistant is the fallback.
+   Apple Music stations (`music.apple.com/.../station/...`) play on Sonos
+   only: Music Assistant can't play them.
 6. Volume: the tag's volume, else the area's, else the default volume.
 
 ## Setup

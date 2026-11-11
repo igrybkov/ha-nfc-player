@@ -165,7 +165,7 @@ func TestSupports(t *testing.T) {
 		{"song", p, player.Request{Media: catalog.Media{Kind: catalog.KindSong}, Area: familyRoom}, true},
 		{"artist", p, player.Request{Media: catalog.Media{Kind: catalog.KindArtist}, Area: familyRoom}, true},
 		{"artist without apple", noApple, player.Request{Media: catalog.Media{Kind: catalog.KindArtist}, Area: familyRoom}, false},
-		{"station", p, player.Request{Media: catalog.Media{Kind: catalog.KindStation}, Area: familyRoom}, false},
+		{"station", p, player.Request{Media: catalog.Media{Kind: catalog.KindStation}, Area: familyRoom}, true},
 		{"query", p, player.Request{Query: &player.Query{}, Area: familyRoom}, false},
 		{"no entity", p, player.Request{Media: catalog.Media{Kind: catalog.KindAlbum}, Area: rooms.Area{ID: "x"}}, false},
 		{"radio", p, player.Request{Media: catalog.Media{Kind: catalog.KindAlbum}, Area: familyRoom, Radio: true}, false},
@@ -174,5 +174,44 @@ func TestSupports(t *testing.T) {
 		if got := tt.p.Supports(tt.req); got != tt.want {
 			t.Errorf("%s: Supports = %v, want %v", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestPlayStation(t *testing.T) {
+	f := &hatest.Fake{StateList: []ha.State{
+		{EntityID: "media_player.tv", Attributes: map[string]any{"media_content_id": "x-sonos-htastream:RINCON_1:spdif"}},
+		{EntityID: "media_player.office", Attributes: map[string]any{"media_content_id": "x-sonos-http:song%3a1.mp4?sid=204&flags=8232&sn=7"}},
+	}}
+	p := New(f, nil)
+	req := player.Request{Media: mustParse(t, "https://music.apple.com/us/station/classic-rock-station/ra.985500514"),
+		Area: familyRoom, Volume: 20, Shuffle: true}
+	if !p.Supports(req) {
+		t.Fatal("station not supported")
+	}
+	if err := p.Play(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	// No shuffle or repeat: a station has neither.
+	want := []hatest.ServiceCall{
+		{Domain: "media_player", Service: "media_stop", Target: target()},
+		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.2}, Target: target()},
+		{Domain: "media_player", Service: "play_media", Target: target(), Data: map[string]any{
+			"media_content_id": "x-sonosapi-radio:radio%3ara.985500514?sid=204&flags=8300&sn=7", "media_content_type": "music",
+		}},
+	}
+	if !reflect.DeepEqual(f.Calls, want) {
+		t.Errorf("calls:\n got %+v\nwant %+v", f.Calls, want)
+	}
+}
+
+func TestPlayStationNoAccount(t *testing.T) {
+	f := &hatest.Fake{}
+	p := New(f, nil)
+	req := player.Request{Media: mustParse(t, "https://music.apple.com/us/station/x/ra.1"), Area: familyRoom}
+	if err := p.Play(context.Background(), req); !errors.Is(err, errNoAccount) {
+		t.Fatalf("err = %v, want errNoAccount", err)
+	}
+	if len(f.Calls) != 0 {
+		t.Errorf("calls = %+v, want none: the current music stays", f.Calls)
 	}
 }

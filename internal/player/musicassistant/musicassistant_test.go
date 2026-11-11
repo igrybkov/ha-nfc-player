@@ -183,7 +183,7 @@ func TestSupports(t *testing.T) {
 		want bool
 	}{
 		{"album", player.Request{Media: catalog.Media{Kind: catalog.KindAlbum, ID: "1"}, Area: office}, true},
-		{"station", player.Request{Media: catalog.Media{Kind: catalog.KindStation, ID: "ra.1"}, Area: office}, true},
+		{"station", player.Request{Media: catalog.Media{Kind: catalog.KindStation, ID: "ra.1"}, Area: office}, false}, // NotImplementedError in MA
 		{"query", player.Request{Query: &player.Query{}, Area: office}, true},
 		{"unknown kind", player.Request{Media: catalog.Media{Kind: catalog.KindUnknown, ID: "1"}, Area: office}, false},
 		{"empty media", player.Request{Area: office}, false},

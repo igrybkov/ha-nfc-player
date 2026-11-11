@@ -66,6 +66,8 @@ func TestParseErrors(t *testing.T) {
 		"apple_music://podcast/1",
 		"apple_music://album/1/2",
 		"library://album/12",
+		"apple_music://radio/ra.1&sn=9", // goes into a Sonos URI
+		"apple_music://radio/ra.",
 	} {
 		if m, err := Parse(raw); err == nil {
 			t.Errorf("Parse(%q) = %+v, want error", raw, m)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"regexp"
 
 	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
@@ -33,15 +34,15 @@ func New(c ha.Client, apple catalog.Apple) *Player {
 
 func (p *Player) Name() string { return "sonos" }
 
-// Supports album, playlist, song and artist media in an area with a Sonos
-// entity. It can't search, so a Query is left to the router, and it has no
+// Supports album, playlist, song, artist and station media in an area with
+// a Sonos entity. It can't search, so a Query is left to the router, and it has no
 // radio mode.
 func (p *Player) Supports(req player.Request) bool {
 	if req.Query != nil || req.Radio || req.Area.SonosEntity == "" {
 		return false
 	}
 	switch req.Media.Kind {
-	case catalog.KindAlbum, catalog.KindPlaylist, catalog.KindSong:
+	case catalog.KindAlbum, catalog.KindPlaylist, catalog.KindSong, catalog.KindStation:
 		return true
 	case catalog.KindArtist:
 		return p.apple != nil
@@ -61,6 +62,9 @@ func (p *Player) Supports(req player.Request) bool {
 func (p *Player) Play(ctx context.Context, req player.Request) error {
 	if !p.Supports(req) {
 		return fmt.Errorf("sonos: unsupported request (kind %q, entity %q)", req.Media.Kind, req.Area.SonosEntity)
+	}
+	if req.Media.Kind == catalog.KindStation {
+		return p.playStation(ctx, req)
 	}
 	urls := []string{req.Media.ShareURL()}
 	if req.Media.Kind == catalog.KindArtist {
@@ -128,3 +132,48 @@ func (p *Player) run(ctx context.Context, target *ha.Target, steps []step) error
 }
 
 var errNoSongs = errors.New("no songs found")
+
+// appleMusicSID is the Sonos service id of Apple Music.
+const appleMusicSID = "204"
+
+// accountRe finds the Apple Music account number (sn) in a Sonos media URI.
+var accountRe = regexp.MustCompile(`[?&]sid=` + appleMusicSID + `&(?:[^&]*&)*?sn=(\d+)`)
+
+// errNoAccount means no Sonos speaker has played Apple Music yet, so the
+// account number for a station URI is unknown.
+var errNoAccount = errors.New("no Apple Music account found on Sonos; play any Apple Music song on a Sonos speaker once, then retry")
+
+// playStation plays an Apple Music station. Sonos takes no share link for
+// it, only its own radio URI, which names the Apple Music account the
+// speakers use. A station has no shuffle or repeat.
+func (p *Player) playStation(ctx context.Context, req player.Request) error {
+	sn, err := p.account(ctx)
+	if err != nil {
+		return fmt.Errorf("sonos: station: %w", err)
+	}
+	// Written as Sonos writes it ("%3a"). catalog.Parse allows only
+	// [A-Za-z0-9._-] in a station id, so it needs no escaping.
+	uri := "x-sonosapi-radio:radio%3a" + req.Media.ID + "?sid=" + appleMusicSID + "&flags=8300&sn=" + sn
+	target := &ha.Target{EntityID: []string{req.Area.SonosEntity}}
+	return p.run(ctx, target, []step{
+		{"media_stop", nil},
+		{"volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}},
+		{"play_media", map[string]any{"media_content_id": uri, "media_content_type": "music"}},
+	})
+}
+
+// account returns the Apple Music account number from the media URI of any
+// Sonos speaker that plays (or last played) Apple Music.
+func (p *Player) account(ctx context.Context) (string, error) {
+	states, err := p.ha.States(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range states {
+		id, _ := s.Attributes["media_content_id"].(string)
+		if m := accountRe.FindStringSubmatch(id); m != nil {
+			return m[1], nil
+		}
+	}
+	return "", errNoAccount
+}

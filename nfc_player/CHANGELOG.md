@@ -4,6 +4,8 @@
 
 - A scanned tag with no entry plays the pool its name matches (name or id,
   cut at "|", any case). "All tags" plays a random tag.
+- Apple Music stations play on Sonos. Music Assistant can't play them, so
+  they no longer fail there with "NotImplementedError".
 
 ## 0.2.1
 
