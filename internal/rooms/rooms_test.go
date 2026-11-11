@@ -134,6 +134,53 @@ func TestAreaOverrides(t *testing.T) {
 	}
 }
 
+func TestEntity(t *testing.T) {
+	f := fixture()
+	f.EntityList = append(f.EntityList,
+		ha.Entity{EntityID: "media_player.portable_ma", DeviceID: "ma-server", Platform: "music_assistant"},
+		ha.Entity{EntityID: "media_player.tv", DeviceID: "sonos-office", Platform: "cast"})
+	s := settings()
+	s.Rooms.Areas["office"] = model.AreaSettings{Volume: ptr(40), SonosEntity: ptr("media_player.disabled")}
+	r := New(f, s)
+	ctx := context.Background()
+
+	tests := []struct {
+		entity string
+		want   Area
+	}{
+		{"media_player.arc", Area{ID: "family_room", Name: "Family Room", SonosEntity: "media_player.arc", Volume: 30}},
+		{"media_player.office_ma", Area{ID: "office", Name: "Office", MAEntity: "media_player.office_ma", Volume: 40}},
+		// Entity area override; the area override of the Sonos entity is not applied.
+		{"media_player.five", Area{ID: "kitchen", Name: "Kitchen", SonosEntity: "media_player.five", Volume: 15}},
+		{"media_player.office", Area{ID: "office", Name: "Office", SonosEntity: "media_player.office", Volume: 40}},
+		{"media_player.portable_ma", Area{MAEntity: "media_player.portable_ma", Volume: 15}},
+	}
+	for _, tt := range tests {
+		got, err := r.Entity(ctx, tt.entity)
+		if err != nil {
+			t.Fatalf("Entity(%s): %v", tt.entity, err)
+		}
+		if got != tt.want {
+			t.Errorf("Entity(%s) = %+v, want %+v", tt.entity, got, tt.want)
+		}
+	}
+
+	errs := []struct {
+		entity string
+		want   error
+	}{
+		{"media_player.nope", ErrUnknownEntity},
+		{"media_player.tv", ErrUnsupportedEntity},
+		{"switch.arc_loudness", ErrUnsupportedEntity},
+		{"event.reader_noarea", ErrUnsupportedEntity},
+	}
+	for _, tt := range errs {
+		if _, err := r.Entity(ctx, tt.entity); !errors.Is(err, tt.want) {
+			t.Errorf("Entity(%s): err = %v, want %v", tt.entity, err, tt.want)
+		}
+	}
+}
+
 func TestAreas(t *testing.T) {
 	r := New(fixture(), settings())
 	areas, err := r.Areas(context.Background())

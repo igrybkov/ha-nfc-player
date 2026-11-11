@@ -164,8 +164,9 @@ func (r *Registry) Delete(id string) error {
 	})
 }
 
-// Validate checks required fields, value ranges and that the URL is one
-// catalog.Parse reads, so a bad link is caught on save rather than on scan.
+// Validate checks required fields, value ranges and the source: a URL that
+// catalog.Parse reads (so a bad link is caught on save rather than on scan),
+// or a pool id.
 func Validate(e model.Entry) error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalid)
@@ -173,14 +174,8 @@ func Validate(e model.Entry) error {
 	if model.NormalizeName(e.Name) == "" {
 		return fmt.Errorf("%w: name has no text before \"|\"", ErrInvalid)
 	}
-	if strings.TrimSpace(e.URL) == "" {
-		return fmt.Errorf("%w: url is required", ErrInvalid)
-	}
-	if _, err := catalog.Parse(e.URL); err != nil {
-		if errors.Is(err, catalog.ErrUnsupported) {
-			return fmt.Errorf("%w: url must be a music.apple.com link or an apple_music://<kind>/<id> URI, not %q", ErrInvalid, e.URL)
-		}
-		return fmt.Errorf("%w: url: %v", ErrInvalid, err)
+	if err := validateSource(e); err != nil {
+		return err
 	}
 	if !e.Repeat.Valid() {
 		return fmt.Errorf("%w: repeat must be off, one or all, not %q", ErrInvalid, e.Repeat)
@@ -195,6 +190,30 @@ func Validate(e model.Entry) error {
 		if strings.TrimSpace(id) == "" {
 			return fmt.Errorf("%w: empty tag id", ErrInvalid)
 		}
+	}
+	return nil
+}
+
+// validateSource checks that exactly one of url and pool is set. A pool must
+// look like a pool id; whether the pool exists is checked at play time, since
+// pools and tags are edited separately.
+func validateSource(e model.Entry) error {
+	switch {
+	case e.URL == "" && e.Pool == "":
+		return fmt.Errorf("%w: url or pool is required", ErrInvalid)
+	case e.URL != "" && e.Pool != "":
+		return fmt.Errorf("%w: set url or pool, not both", ErrInvalid)
+	case e.Pool != "":
+		if e.Pool != model.PoolAll && Slug(e.Pool) != e.Pool {
+			return fmt.Errorf("%w: pool must be a pool id (lowercase letters, digits, \"-\") or %q, not %q", ErrInvalid, model.PoolAll, e.Pool)
+		}
+		return nil
+	}
+	if _, err := catalog.Parse(e.URL); err != nil {
+		if errors.Is(err, catalog.ErrUnsupported) {
+			return fmt.Errorf("%w: url must be a music.apple.com link or an apple_music://<kind>/<id> URI, not %q", ErrInvalid, e.URL)
+		}
+		return fmt.Errorf("%w: url: %v", ErrInvalid, err)
 	}
 	return nil
 }
@@ -237,6 +256,7 @@ func normalize(e *model.Entry) {
 	e.ID = strings.TrimSpace(e.ID)
 	e.Name = strings.TrimSpace(e.Name)
 	e.URL = strings.TrimSpace(e.URL)
+	e.Pool = strings.TrimSpace(e.Pool)
 	ids := make([]string, 0, len(e.TagIDs))
 	for _, id := range e.TagIDs {
 		if id = strings.TrimSpace(id); id != "" && !slices.Contains(ids, id) {

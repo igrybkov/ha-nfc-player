@@ -30,6 +30,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/player"
 	"github.com/igrybkov/ha-nfc-player/internal/player/musicassistant"
 	"github.com/igrybkov/ha-nfc-player/internal/player/sonos"
+	"github.com/igrybkov/ha-nfc-player/internal/pools"
 	"github.com/igrybkov/ha-nfc-player/internal/registry"
 	"github.com/igrybkov/ha-nfc-player/internal/rooms"
 	"github.com/igrybkov/ha-nfc-player/internal/scan"
@@ -110,6 +111,7 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	// Storage. A missing file reads as its defaults and is created on the
 	// first save, so nothing is written to config_dir until the user saves.
 	tags := registry.New(store.Open(cfg.Path(config.TagsFile), registry.DefaultTagsFile))
+	poolStore := pools.New(store.Open(cfg.Path(config.PoolsFile), pools.DefaultFile), tags)
 	settings := config.NewSettingsStore(store.Open(cfg.Path(config.SettingsFile), model.DefaultSettings))
 	templates, err := config.NewTemplateStore(store.Open(cfg.Path(config.TemplatesFile), emptyList[labels.Template]))
 	if err != nil {
@@ -130,7 +132,7 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	router := player.NewRouter(settings, ma, sonos.New(client, &catalog.ITunes{}), ma)
 	scans := scan.NewRing(scan.LogSize)
 	handler := scan.New(scan.Deps{
-		HA: client, Entries: tags, Settings: settings, Rooms: resolver,
+		HA: client, Entries: tags, Pools: poolStore, Settings: settings, Rooms: resolver,
 		Router: router, Log: scans, Logger: log,
 	})
 
@@ -138,9 +140,11 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	if art == nil {
 		art = &artwork.Cache{Dir: filepath.Join(cfg.DataDir, "cache"), ConfigDir: cfg.ConfigDir, Logger: log}
 	}
+	// A pool tag shows the art of its pool's first item.
+	art = &pools.Artwork{Pools: poolStore, Source: art}
 
 	srv := web.New(web.Deps{
-		Registry: tags, Settings: settings, Templates: templates, Backgrounds: backgrounds,
+		Registry: tags, Pools: poolStore, Settings: settings, Templates: templates, Backgrounds: backgrounds,
 		Play: handler, Scans: scans, Artwork: art, HATags: client,
 		Supervisor: cfg.Supervisor, Logger: log,
 	})

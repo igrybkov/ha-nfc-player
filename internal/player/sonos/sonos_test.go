@@ -160,6 +160,7 @@ func TestSupports(t *testing.T) {
 		{"station", p, player.Request{Media: catalog.Media{Kind: catalog.KindStation}, Area: familyRoom}, false},
 		{"query", p, player.Request{Query: &player.Query{}, Area: familyRoom}, false},
 		{"no entity", p, player.Request{Media: catalog.Media{Kind: catalog.KindAlbum}, Area: rooms.Area{ID: "x"}}, false},
+		{"radio", p, player.Request{Media: catalog.Media{Kind: catalog.KindAlbum}, Area: familyRoom, Radio: true}, false},
 	}
 	for _, tt := range tests {
 		if got := tt.p.Supports(tt.req); got != tt.want {

@@ -60,7 +60,8 @@ func (s *Server) haAreas(w http.ResponseWriter, r *http.Request) {
 }
 
 // scanView is a scan plus the entry it resolves to now. An unknown scan
-// stops being unknown once an entry for it exists.
+// stops being unknown once an entry for it exists. Only tag scans resolve:
+// for events and UI commands TagName is a description, not an HA tag name.
 type scanView struct {
 	model.Scan
 	MatchesEntry string `json:"matches_entry"`
@@ -70,7 +71,11 @@ func (s *Server) scans(w http.ResponseWriter, _ *http.Request) {
 	recent := s.deps.Scans.Recent()
 	out := make([]scanView, 0, len(recent))
 	for _, sc := range recent {
-		out = append(out, scanView{Scan: sc, MatchesEntry: s.resolve(sc.TagID, sc.TagName)})
+		v := scanView{Scan: sc}
+		if sc.Source == "" || sc.Source == model.SourceTag {
+			v.MatchesEntry = s.resolve(sc.TagID, sc.TagName)
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

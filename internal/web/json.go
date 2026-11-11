@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/igrybkov/ha-nfc-player/internal/config"
+	"github.com/igrybkov/ha-nfc-player/internal/pools"
 	"github.com/igrybkov/ha-nfc-player/internal/registry"
 )
 
@@ -69,11 +70,12 @@ func (s *Server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		status = http.StatusRequestEntityTooLarge
 	case errors.As(err, &reqErr),
 		errors.Is(err, registry.ErrInvalid),
+		errors.Is(err, pools.ErrInvalid),
 		errors.Is(err, config.ErrInvalid):
 		status = http.StatusBadRequest
-	case errors.Is(err, registry.ErrNotFound), errors.Is(err, config.ErrNotFound):
+	case errors.Is(err, registry.ErrNotFound), errors.Is(err, pools.ErrNotFound), errors.Is(err, config.ErrNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, registry.ErrDuplicate), errors.Is(err, config.ErrDuplicate):
+	case errors.Is(err, registry.ErrDuplicate), errors.Is(err, pools.ErrDuplicate), errors.Is(err, config.ErrDuplicate):
 		status = http.StatusConflict
 	case errors.Is(err, config.ErrReadOnly):
 		status = http.StatusForbidden

@@ -30,9 +30,10 @@ func New(c ha.Client, apple catalog.Apple) *Player { return &Player{ha: c, apple
 func (p *Player) Name() string { return "sonos" }
 
 // Supports album, playlist, song and artist media in an area with a Sonos
-// entity. It can't search, so a Query is left to the router.
+// entity. It can't search, so a Query is left to the router, and it has no
+// radio mode.
 func (p *Player) Supports(req player.Request) bool {
-	if req.Query != nil || req.Area.SonosEntity == "" {
+	if req.Query != nil || req.Radio || req.Area.SonosEntity == "" {
 		return false
 	}
 	switch req.Media.Kind {

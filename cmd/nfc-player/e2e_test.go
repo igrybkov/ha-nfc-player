@@ -73,7 +73,7 @@ type app struct {
 func startApp(t *testing.T, haURL string) *app {
 	t.Helper()
 	cfgDir, dataDir := t.TempDir(), t.TempDir()
-	for _, name := range []string{config.TagsFile, config.SettingsFile} {
+	for _, name := range []string{config.TagsFile, config.SettingsFile, config.PoolsFile} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "examples", name))
 		if err != nil {
 			t.Fatal(err)
@@ -208,6 +208,76 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("areas = %+v", areas)
 	}
 
+	a.shutdown(t)
+}
+
+// Play and stop events over the wire, then the web play box, on the seed
+// files. The pool comes from examples/pools.yaml.
+func TestEndToEndPlayEvents(t *testing.T) {
+	fake := officeHA()
+	srv := hatest.NewServer(fake, testToken)
+	defer srv.Close()
+	a := startApp(t, srv.URL())
+	waitFor(t, "command subscriptions", func() bool {
+		return srv.Subscribers(scan.PlayEventType) > 0 && srv.Subscribers(scan.StopEventType) > 0
+	})
+
+	// Values as an HA template renders them.
+	url := "https://music.apple.com/us/album/divisive/1646032515"
+	srv.Emit(scan.PlayEventType, map[string]any{"area": "office", "media": url, "volume": "40", "shuffle": "false", "pool": ""})
+	waitFor(t, "five service calls", func() bool { return len(fake.ServiceCalls()) >= 5 })
+	target := &ha.Target{EntityID: []string{"media_player.office"}}
+	want := []hatest.ServiceCall{
+		{Domain: "media_player", Service: "media_stop", Target: target},
+		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.4}, Target: target},
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": false}, Target: target},
+		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": url, "media_content_type": "music"}, Target: target},
+	}
+	if got := fake.ServiceCalls(); !reflect.DeepEqual(got, want) {
+		t.Errorf("service calls:\n got %+v\nwant %+v", got, want)
+	}
+
+	// Stop with nothing playing stops the Sonos entity.
+	srv.Emit(scan.StopEventType, map[string]any{"area": "office"})
+	waitFor(t, "media_stop", func() bool { return len(fake.ServiceCalls()) >= 6 })
+	if c := fake.ServiceCalls()[5]; c.Service != "media_stop" || !reflect.DeepEqual(c.Target, target) {
+		t.Errorf("stop call = %+v", c)
+	}
+	var scans []model.Scan
+	waitFor(t, "two events in the log", func() bool {
+		_, _, body := a.get(t, "/api/scans")
+		_ = json.Unmarshal(body, &scans)
+		return len(scans) == 2
+	})
+
+	// The play box: a seed tag by id, synchronous.
+	code, _, body := a.post(t, "/api/play", map[string]any{"area": "office", "tag": "kenny-rogers-21-number-ones"})
+	var res model.PlayResult
+	if err := json.Unmarshal(body, &res); code != http.StatusOK || err != nil || res.Player != "sonos" || res.EntryID != "kenny-rogers-21-number-ones" {
+		t.Fatalf("play: %d %s", code, body)
+	}
+
+	// The seed pool is served.
+	code, _, body = a.get(t, "/api/pools")
+	if code != http.StatusOK || !bytes.Contains(body, []byte(`"id":"kitchen"`)) {
+		t.Errorf("pools: %d %.200s", code, body)
+	}
+
+	_, _, body = a.get(t, "/api/scans")
+	if err := json.Unmarshal(body, &scans); err != nil || len(scans) != 3 {
+		t.Fatalf("scans: %s", body)
+	}
+	// Newest first.
+	if s := scans[0]; s.Source != model.SourceUI || s.Result != model.ScanPlayed {
+		t.Errorf("ui scan = %+v", s)
+	}
+	if s := scans[1]; s.Source != model.SourceEvent || s.Result != model.ScanStopped || s.TagName != "stop" {
+		t.Errorf("stop scan = %+v", s)
+	}
+	if s := scans[2]; s.Source != model.SourceEvent || s.Result != model.ScanPlayed || s.Media != url || s.AreaID != "office" {
+		t.Errorf("play scan = %+v", s)
+	}
 	a.shutdown(t)
 }
 

@@ -144,6 +144,12 @@ export async function render(view) {
         return;
       }
     }
+    // Copies of an entry print next to each other, so the n-th printed
+    // slot holds selected[n / copies].
+    const perEntry = Math.max(1, state.copies);
+    let printed = 0;
+    // Detach the old slots first so their thumbnails can be reused.
+    sheet.replaceChildren();
     sheet.replaceChildren(...pages.map((slots, p) => h('div', { class: 'sheet-wrap' },
       pages.length > 1 && h('div', { class: 'muted small', text: `Sheet ${p + 1}` }),
       h('div', { class: 'sheet', style: `grid-template-columns: repeat(${t.grid.cols}, 1fr)` },
@@ -151,14 +157,16 @@ export async function render(view) {
           const row = Math.floor(i / t.grid.cols) + 1;
           const col = (i % t.grid.cols) + 1;
           const isStart = p === 0 && row === state.row && col === state.col;
+          const e = st === 'printed' ? byID.get(state.selected[Math.floor(printed++ / perEntry)]) : null;
+          const where = `Row ${row}, column ${col}`;
           return h('button', {
             type: 'button',
             class: `slot ${st}${isStart ? ' start' : ''}`,
-            title: `Row ${row}, column ${col}: ${st}`,
-            'aria-label': `Row ${row}, column ${col}, ${st}`,
+            title: e ? `${where}: ${e.name}` : `${where}: ${st}`,
+            'aria-label': e ? `${where}, ${e.name}` : `${where}, ${st}`,
             disabled: p > 0,
             onclick: () => { state.row = row; state.col = col; preview(); },
-          });
+          }, e && thumb(e, 32), e && h('span', { class: 'slot-name', text: e.name }));
         })))));
   }
 

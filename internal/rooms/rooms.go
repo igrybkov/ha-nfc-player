@@ -23,8 +23,15 @@ const (
 // FallbackVolume is used when settings have no usable rooms.default_volume.
 const FallbackVolume = 15
 
-// ErrUnknownArea means HA has no area with that id.
-var ErrUnknownArea = errors.New("unknown area")
+var (
+	// ErrUnknownArea means HA has no area with that id.
+	ErrUnknownArea = errors.New("unknown area")
+	// ErrUnknownEntity means the entity registry has no entity with that id.
+	ErrUnknownEntity = errors.New("unknown entity")
+	// ErrUnsupportedEntity means the entity is not a media_player of a
+	// player integration (sonos, music_assistant).
+	ErrUnsupportedEntity = errors.New("not a sonos or music_assistant media player")
+)
 
 // Area is an HA area with resolved players. Empty entity = none in the area.
 type Area struct {
@@ -110,15 +117,54 @@ func (r *Resolver) Areas(ctx context.Context) ([]Area, error) {
 	return out, nil
 }
 
+// Entity resolves one media player entity to an Area that holds only that
+// entity: SonosEntity for a sonos entity, MAEntity for a music_assistant one.
+// ID, Name and Volume come from the entity's area (its own, else its
+// device's). An entity without an area gets an empty ID and Name and
+// rooms.default_volume. Area settings don't swap the entity.
+func (r *Resolver) Entity(ctx context.Context, entityID string) (Area, error) {
+	reg, err := r.load(ctx, true)
+	if err != nil {
+		return Area{}, err
+	}
+	i := slices.IndexFunc(reg.entities, func(e ha.Entity) bool { return e.EntityID == entityID })
+	if i < 0 {
+		return Area{}, fmt.Errorf("%w: %q", ErrUnknownEntity, entityID)
+	}
+	e := reg.entities[i]
+	if !strings.HasPrefix(e.EntityID, "media_player.") {
+		return Area{}, fmt.Errorf("%w: %q", ErrUnsupportedEntity, entityID)
+	}
+	s := r.settings.Settings()
+	out := Area{ID: reg.entityArea(e), Volume: areaVolume(s, reg.entityArea(e))}
+	if j := slices.IndexFunc(reg.areas, func(a ha.Area) bool { return a.AreaID == out.ID }); j >= 0 {
+		out.Name = reg.areas[j].Name
+	}
+	switch e.Platform {
+	case SonosPlatform:
+		out.SonosEntity = e.EntityID
+	case MusicAssistantPlatform:
+		out.MAEntity = e.EntityID
+	default:
+		return Area{}, fmt.Errorf("%w: %q is a %s entity", ErrUnsupportedEntity, entityID, e.Platform)
+	}
+	return out, nil
+}
+
+// areaVolume is the area's volume from settings, else rooms.default_volume.
+func areaVolume(s model.Settings, areaID string) int {
+	if v := s.Rooms.Areas[areaID].Volume; v != nil && areaID != "" {
+		return *v
+	}
+	if s.Rooms.DefaultVolume > 0 {
+		return s.Rooms.DefaultVolume
+	}
+	return FallbackVolume
+}
+
 func (r *Resolver) resolve(reg registry, a ha.Area, s model.Settings) Area {
 	as := s.Rooms.Areas[a.AreaID]
-	out := Area{ID: a.AreaID, Name: a.Name, Volume: s.Rooms.DefaultVolume}
-	if out.Volume <= 0 {
-		out.Volume = FallbackVolume
-	}
-	if as.Volume != nil {
-		out.Volume = *as.Volume
-	}
+	out := Area{ID: a.AreaID, Name: a.Name, Volume: areaVolume(s, a.AreaID)}
 
 	sonos := reg.players(a.AreaID, SonosPlatform)
 	out.SonosEntity = pickSonos(reg, sonos, s.Rooms.SonosModelPreference)

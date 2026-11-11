@@ -49,8 +49,9 @@ func (p *Player) Supports(req player.Request) bool {
 }
 
 // Play resolves a Query if needed, then runs volume_set, play_media
-// (enqueue replace), shuffle_set and repeat_set on the MA entity. Volume
-// goes first so the music never starts at the previous level.
+// (enqueue replace, radio_mode when asked), shuffle_set and repeat_set on
+// the MA entity. Volume goes first so the music never starts at the
+// previous level.
 func (p *Player) Play(ctx context.Context, req player.Request) error {
 	if !p.Supports(req) {
 		return fmt.Errorf("music assistant: unsupported request (kind %q, entity %q)", req.Media.Kind, req.Area.MAEntity)
@@ -68,16 +69,20 @@ func (p *Player) Play(ctx context.Context, req player.Request) error {
 		repeat = "all"
 	}
 	target := &ha.Target{EntityID: []string{req.Area.MAEntity}}
+	play := map[string]any{
+		"media_id":   media.URI(),
+		"media_type": mediaType(media.Kind),
+		"enqueue":    "replace",
+	}
+	if req.Radio {
+		play["radio_mode"] = true
+	}
 	steps := []struct {
 		domain, service string
 		data            map[string]any
 	}{
 		{"media_player", "volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}},
-		{"music_assistant", "play_media", map[string]any{
-			"media_id":   media.URI(),
-			"media_type": mediaType(media.Kind),
-			"enqueue":    "replace",
-		}},
+		{"music_assistant", "play_media", play},
 		{"media_player", "shuffle_set", map[string]any{"shuffle": req.Shuffle}},
 		{"media_player", "repeat_set", map[string]any{"repeat": repeat}},
 	}
@@ -111,7 +116,7 @@ type searchResponse struct {
 }
 
 // Search runs music_assistant.search and returns the first apple_music:// hit.
-// Albums come before playlists. Library items (library://) are skipped: Sonos
+// A Query without Artist searches by name only. Albums come before playlists. Library items (library://) are skipped: Sonos
 // can't play them.
 func (p *Player) Search(ctx context.Context, area rooms.Area, q player.Query) (catalog.Media, error) {
 	entryID, err := p.configEntry(ctx, area)
@@ -121,9 +126,11 @@ func (p *Player) Search(ctx context.Context, area rooms.Area, q player.Query) (c
 	data := map[string]any{
 		"config_entry_id": entryID,
 		"name":            q.Album,
-		"artist":          q.Artist,
 		"media_type":      []string{"album", "playlist"},
 		"limit":           SearchLimit,
+	}
+	if q.Artist != "" {
+		data["artist"] = q.Artist // a name-only search must not filter by an empty artist
 	}
 	raw, err := p.ha.CallService(ctx, "music_assistant", "search", data, nil, true)
 	if err != nil {

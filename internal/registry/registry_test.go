@@ -57,6 +57,10 @@ func TestValidate(t *testing.T) {
 		func(e *model.Entry) { e.URL = "spotify:album:1" },                       // unsupported scheme
 		func(e *model.Entry) { e.URL = "apple_music://album/not-a-number" },      // parses, bad id
 		func(e *model.Entry) { e.URL = "https://music.apple.com/us/playlist/x" }, // no id
+		func(e *model.Entry) { e.Pool = "kitchen" },                              // url and pool
+		func(e *model.Entry) { e.URL, e.Pool = "", "Kitchen" },                   // not a slug
+		func(e *model.Entry) { e.URL, e.Pool = "", "kitchen mix" },
+		func(e *model.Entry) { e.URL, e.Pool = "", "-kitchen" },
 	}
 	for i, mod := range bad {
 		e := ok
@@ -83,6 +87,36 @@ func TestValidate(t *testing.T) {
 		if err := Validate(e); err != nil {
 			t.Errorf("volume %d: %v", v, err)
 		}
+	}
+}
+
+func TestPoolEntries(t *testing.T) {
+	r, _ := newRegistry(t)
+	// Trimmed, and an unknown pool is fine at save time.
+	e, err := r.Create(model.Entry{Name: "Kitchen mix", Pool: "  kitchen  "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Pool != "kitchen" || e.URL != "" {
+		t.Fatalf("got pool %q url %q", e.Pool, e.URL)
+	}
+	for _, p := range []string{model.PoolAll, "кухня", "mix-2"} {
+		if _, err := r.Create(model.Entry{Name: "Pool " + p, Pool: p}); err != nil {
+			t.Errorf("pool %q: %v", p, err)
+		}
+	}
+	// Switch the entry from pool to url and back.
+	e.Pool, e.URL = "", "apple_music://album/1"
+	if e, err = r.Update(e.ID, e); err != nil || e.URL == "" || e.Pool != "" {
+		t.Fatalf("to url: %+v, %v", e, err)
+	}
+	e.Pool, e.URL = model.PoolAll, ""
+	if e, err = r.Update(e.ID, e); err != nil || e.Pool != model.PoolAll {
+		t.Fatalf("to pool: %+v, %v", e, err)
+	}
+	// Whitespace-only url and pool count as unset.
+	if _, err := r.Create(model.Entry{Name: "Nothing", URL: " ", Pool: " "}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("no source: got %v, want ErrInvalid", err)
 	}
 }
 

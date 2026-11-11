@@ -16,6 +16,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
+	"github.com/igrybkov/ha-nfc-player/internal/pools"
 	"github.com/igrybkov/ha-nfc-player/internal/registry"
 )
 
@@ -36,6 +37,7 @@ type Labels interface {
 // Deps are the collaborators of the server.
 type Deps struct {
 	Registry    *registry.Registry
+	Pools       *pools.Store
 	Settings    *config.SettingsStore
 	Templates   *config.TemplateStore
 	Backgrounds *config.BackgroundStore
@@ -89,6 +91,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tags/{id}", s.deleteTag)
 	mux.HandleFunc("POST /api/tags/{id}/play", s.playTag)
 	mux.HandleFunc("GET /api/tags/{id}/artwork", s.tagArtwork)
+
+	mux.HandleFunc("GET /api/pools", s.listPools)
+	mux.HandleFunc("POST /api/pools", s.createPool)
+	mux.HandleFunc("PUT /api/pools/{id}", s.updatePool)
+	mux.HandleFunc("DELETE /api/pools/{id}", s.deletePool)
+	mux.HandleFunc("POST /api/play", s.play)
+	mux.HandleFunc("POST /api/stop", s.stop)
 
 	mux.HandleFunc("GET /api/ha/tags", s.haTags)
 	mux.HandleFunc("GET /api/ha/areas", s.haAreas)

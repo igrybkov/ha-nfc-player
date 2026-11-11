@@ -36,6 +36,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Author display rules (.field, .check) would beat the UA [hidden] rule. */
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--fg); }
 a { color: var(--primary); }
 h1 { font-size: 1.25rem; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -116,8 +118,17 @@ table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 td input { width: 100%; min-width: 80px; }
 tr.error td:last-child { color: var(--danger); }
+tr.stopped td:last-child { color: var(--muted); }
 .history { margin-top: 20px; }
 .history summary { cursor: pointer; padding: 8px 0; }
+
+/* Pools */
+.thumb.s32 { width: 32px; height: 32px; }
+.play-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.play-row > select, .play-row > input { flex: 1 1 180px; min-width: 0; }
+.picker .search-list .list { max-height: 40vh; }
+.inline { display: flex; gap: 8px; }
+.inline > input { flex: 1; min-width: 0; }
 
 /* Print sheet map */
 .sheets { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -126,9 +137,19 @@ tr.error td:last-child { color: var(--danger); }
 .slot { min-height: 18px; padding: 0; border-radius: 3px; border: 1px solid var(--line); }
 .sheet .slot { aspect-ratio: 2.6 / 1; min-height: 0; }
 .slot.used { background: var(--used); }
-.slot.printed { background: var(--printed); border-color: var(--printed); }
+.slot.printed { background: color-mix(in srgb, var(--printed) 22%, var(--card)); border-color: var(--printed); }
 .slot.free { background: var(--free); }
 .slot.start { outline: 2px solid var(--danger); outline-offset: 1px; }
+/* Printed slots show the label's art and name. */
+.sheet .slot.printed {
+  display: flex; align-items: center; gap: 4px; padding: 2px; overflow: hidden;
+  color: inherit; text-align: left;
+}
+.sheet .slot.printed .thumb { width: auto; height: 100%; aspect-ratio: 1; border-radius: 2px; }
+.sheet .slot-name {
+  min-width: 0; font-size: 10px; line-height: 1.15; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 .legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .legend .slot { display: inline-block; width: 22px; min-height: 12px; height: 12px; }
 

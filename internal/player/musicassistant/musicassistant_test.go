@@ -119,6 +119,24 @@ func TestSearch(t *testing.T) {
 			t.Errorf("ShareURL = %s", m.ShareURL())
 		}
 	})
+	t.Run("name only", func(t *testing.T) {
+		f := &hatest.Fake{EntityList: entities(), Respond: respond(searchResult)}
+		if _, err := New(f, defaults()).Search(context.Background(), office, player.Query{Album: "Divisive"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := f.Calls[0].Data["artist"]; ok || f.Calls[0].Data["name"] != "Divisive" {
+			t.Errorf("search data = %v, want name only", f.Calls[0].Data)
+		}
+	})
+	t.Run("with artist", func(t *testing.T) {
+		f := &hatest.Fake{EntityList: entities(), Respond: respond(searchResult)}
+		if _, err := New(f, defaults()).Search(context.Background(), office, q); err != nil {
+			t.Fatal(err)
+		}
+		if f.Calls[0].Data["artist"] != "Metallica" {
+			t.Errorf("search data = %v", f.Calls[0].Data)
+		}
+	})
 	t.Run("nothing found", func(t *testing.T) {
 		f := &hatest.Fake{EntityList: entities(), Respond: respond(`{"albums":[],"playlists":[]}`)}
 		_, err := New(f, defaults()).Search(context.Background(), office, q)
@@ -170,10 +188,40 @@ func TestSupports(t *testing.T) {
 		{"unknown kind", player.Request{Media: catalog.Media{Kind: catalog.KindUnknown, ID: "1"}, Area: office}, false},
 		{"empty media", player.Request{Area: office}, false},
 		{"no MA entity", player.Request{Query: &player.Query{}, Area: noMA}, false},
+		{"radio", player.Request{Media: catalog.Media{Kind: catalog.KindAlbum, ID: "1"}, Area: office, Radio: true}, true},
 	}
 	for _, tt := range tests {
 		if got := p.Supports(tt.req); got != tt.want {
 			t.Errorf("%s: Supports = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestPlayRadioMode(t *testing.T) {
+	f := &hatest.Fake{}
+	m, _ := catalog.Parse("https://music.apple.com/us/artist/the-dead-south/668262442")
+	if err := New(f, defaults()).Play(context.Background(), player.Request{Media: m, Area: office, Volume: 20, Radio: true}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"media_id": "apple_music://artist/668262442", "media_type": "artist", "enqueue": "replace", "radio_mode": true}
+	if got := f.Calls[1].Data; !reflect.DeepEqual(got, want) {
+		t.Errorf("play_media data = %v, want %v", got, want)
+	}
+}
+
+// Radio skips Sonos (first in the chain) and falls through to MA.
+func TestRouterRadioSkipsSonos(t *testing.T) {
+	f := &hatest.Fake{}
+	ma := New(f, defaults())
+	r := player.NewRouter(defaults(), ma, sonos.New(f, nil), ma)
+	m, _ := catalog.Parse("https://music.apple.com/us/album/divisive/1646032515")
+	name, err := r.Play(context.Background(), player.Request{Media: m, Area: office, Volume: 15, Radio: true}, "")
+	if err != nil || name != "music_assistant" {
+		t.Fatalf("Play = %q, %v", name, err)
+	}
+	for _, c := range f.Calls {
+		if c.Target.EntityID[0] != "media_player.office_ma" {
+			t.Errorf("call on %v, want only the MA entity", c.Target.EntityID)
 		}
 	}
 }

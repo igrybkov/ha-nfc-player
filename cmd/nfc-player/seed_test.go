@@ -7,6 +7,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/config"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
+	"github.com/igrybkov/ha-nfc-player/internal/pools"
 	"github.com/igrybkov/ha-nfc-player/internal/registry"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
@@ -102,5 +103,35 @@ func TestSeedSettings(t *testing.T) {
 	}
 	if len(s.Readers.Integrations) != 1 || s.Readers.Integrations[0] != "esphome" || !s.Players.Fallback {
 		t.Errorf("readers %+v, players %+v", s.Readers, s.Players)
+	}
+}
+
+func TestSeedPools(t *testing.T) {
+	tags := registry.New(store.Open(filepath.Join("..", "..", "examples", config.TagsFile), registry.DefaultTagsFile))
+	f := store.Open(filepath.Join("..", "..", "examples", config.PoolsFile), pools.DefaultFile)
+	file, err := f.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Version != 1 || len(file.Pools) != 1 {
+		t.Fatalf("version %d, %d pools; want 1, 1", file.Version, len(file.Pools))
+	}
+	p, ok := pools.New(f, tags).Pool("kitchen")
+	if !ok {
+		t.Fatal("no kitchen pool")
+	}
+	if p.Name != "Kitchen" || p.Shuffle == nil || !*p.Shuffle || p.Repeat == nil || *p.Repeat != model.RepeatAll ||
+		p.Volume == nil || *p.Volume != 30 || p.Player != nil || len(p.Items) != 8 {
+		t.Errorf("kitchen = %+v", p)
+	}
+	if p.Items[0].Tag != "kenny-rogers-21-number-ones" || p.Items[1].Media != "Cat Stevens — Teaser and the Firecat" {
+		t.Errorf("items = %+v", p.Items[:2])
+	}
+	// Every pool passes the store's validation (tag items exist, URLs parse).
+	check := pools.New(store.Open(filepath.Join(t.TempDir(), config.PoolsFile), pools.DefaultFile), tags)
+	for _, p := range file.Pools {
+		if _, err := check.Create(p); err != nil {
+			t.Errorf("%s: %v", p.ID, err)
+		}
 	}
 }

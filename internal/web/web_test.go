@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -23,7 +24,10 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
+	"github.com/igrybkov/ha-nfc-player/internal/pools"
 	"github.com/igrybkov/ha-nfc-player/internal/registry"
+	"github.com/igrybkov/ha-nfc-player/internal/rooms"
+	"github.com/igrybkov/ha-nfc-player/internal/scan"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
 
@@ -32,6 +36,8 @@ import (
 type fakePlay struct {
 	mu     sync.Mutex
 	played []string // entry id @ area
+	cmds   []model.PlayCommand
+	stops  []model.Target
 	err    error
 	panic  bool
 	areas  []model.AreaInfo
@@ -44,6 +50,23 @@ func (f *fakePlay) PlayEntry(_ context.Context, e model.Entry, areaID string) (s
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.played = append(f.played, e.ID+"@"+areaID)
+	return "sonos", f.err
+}
+
+func (f *fakePlay) Play(_ context.Context, cmd model.PlayCommand) (model.PlayResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cmds = append(f.cmds, cmd)
+	if f.err != nil {
+		return model.PlayResult{}, f.err
+	}
+	return model.PlayResult{Player: "music_assistant", PoolID: cmd.Pool, Media: cmd.Media}, nil
+}
+
+func (f *fakePlay) Stop(_ context.Context, t model.Target) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stops = append(f.stops, t)
 	return "sonos", f.err
 }
 
@@ -173,6 +196,7 @@ func (f *fakeLabels) lastJob(t *testing.T) labels.Job {
 type testEnv struct {
 	h        http.Handler
 	reg      *registry.Registry
+	pools    *pools.Store
 	settings *config.SettingsStore
 	play     *fakePlay
 	scans    *fakeScans
@@ -202,8 +226,9 @@ func newEnv(t *testing.T, supervisor bool) *testEnv {
 		tags:     &fakeTags{},
 		lbl:      &fakeLabels{},
 	}
+	e.pools = pools.New(store.Open(filepath.Join(dir, config.PoolsFile), pools.DefaultFile), e.reg)
 	e.h = New(Deps{
-		Registry: e.reg, Settings: e.settings, Templates: tpls, Backgrounds: bgs,
+		Registry: e.reg, Pools: e.pools, Settings: e.settings, Templates: tpls, Backgrounds: bgs,
 		Play: e.play, Scans: e.scans, Artwork: e.art, HATags: e.tags, Labels: e.lbl,
 		Supervisor: supervisor,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -319,6 +344,134 @@ func TestTagsCRUD(t *testing.T) {
 
 	wantStatus(t, e.do(t, "DELETE", "/api/tags/metallica-essential", nil), http.StatusNoContent)
 	wantJSONError(t, e.do(t, "DELETE", "/api/tags/metallica-essential", nil), http.StatusNotFound)
+}
+
+func TestPoolTags(t *testing.T) {
+	e := newEnv(t, false)
+
+	w := e.do(t, "POST", "/api/tags", map[string]any{"name": "Kitchen mix", "pool": " kitchen "})
+	wantStatus(t, w, http.StatusCreated)
+	if got := decode[model.Entry](t, w); got.Pool != "kitchen" || got.URL != "" {
+		t.Fatalf("created %+v", got)
+	}
+	wantStatus(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "Everything", "pool": "all"}), http.StatusCreated)
+	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "Both", "pool": "kitchen", "url": "apple_music://album/1"}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "Bad", "pool": "Kitchen Mix"}), http.StatusBadRequest)
+}
+
+func TestPoolsCRUD(t *testing.T) {
+	e := newEnv(t, false)
+	en := e.mustCreate(t, model.Entry{Name: "A — B", URL: "apple_music://album/1"})
+
+	w := e.do(t, "GET", "/api/pools", nil)
+	wantStatus(t, w, http.StatusOK)
+	if got := w.Body.String(); !strings.Contains(got, `"pools":[]`) {
+		t.Fatalf("empty list %s", got)
+	}
+
+	body := map[string]any{"name": "Kitchen", "shuffle": true, "repeat": nil, "volume": nil, "player": nil,
+		"items": []map[string]string{{"tag": en.ID}, {"media": "Cat Stevens — Teaser and the Firecat"}}}
+	w = e.do(t, "POST", "/api/pools", body)
+	wantStatus(t, w, http.StatusCreated)
+	p := decode[model.Pool](t, w)
+	if p.ID != "kitchen" || len(p.Items) != 2 || p.Shuffle == nil || !*p.Shuffle {
+		t.Fatalf("created %+v", p)
+	}
+
+	body["id"] = "kitchen"
+	wantJSONError(t, e.do(t, "POST", "/api/pools", body), http.StatusConflict)
+	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"name": "Empty", "items": []any{}}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"name": "Gone", "items": []map[string]string{{"tag": "missing"}}}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"name": "X", "itms": []any{}}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"id": "all", "name": "All", "items": []map[string]string{{"tag": en.ID}}}), http.StatusBadRequest)
+
+	w = e.do(t, "GET", "/api/pools", nil)
+	if got := decode[poolList](t, w); len(got.Pools) != 1 || got.Pools[0].ID != "kitchen" {
+		t.Fatalf("list %+v", got)
+	}
+
+	p.Items = p.Items[1:]
+	vol := 40
+	p.Volume = &vol
+	w = e.do(t, "PUT", "/api/pools/kitchen", p)
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[model.Pool](t, w); len(got.Items) != 1 || got.Volume == nil || *got.Volume != 40 {
+		t.Fatalf("updated %+v", got)
+	}
+	p.ID = ""
+	wantJSONError(t, e.do(t, "PUT", "/api/pools/missing", p), http.StatusNotFound)
+
+	// Rename: the new id goes in the body.
+	p.ID = "kitchen-mix"
+	w = e.do(t, "PUT", "/api/pools/kitchen", p)
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[model.Pool](t, w); got.ID != "kitchen-mix" {
+		t.Fatalf("renamed %+v", got)
+	}
+	p.ID = "Kitchen Mix"
+	wantJSONError(t, e.do(t, "PUT", "/api/pools/kitchen-mix", p), http.StatusBadRequest)
+
+	wantStatus(t, e.do(t, "DELETE", "/api/pools/kitchen-mix", nil), http.StatusNoContent)
+	wantJSONError(t, e.do(t, "DELETE", "/api/pools/kitchen-mix", nil), http.StatusNotFound)
+}
+
+func TestPlayCommand(t *testing.T) {
+	e := newEnv(t, false)
+
+	w := e.do(t, "POST", "/api/play", map[string]any{"area": "office", "pool": "all", "volume": 20})
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[model.PlayResult](t, w); got.Player != "music_assistant" || got.PoolID != "all" {
+		t.Fatalf("result %+v", got)
+	}
+	cmd := e.play.cmds[0]
+	if cmd.Source != model.SourceUI || cmd.AreaID != "office" || cmd.Volume == nil || *cmd.Volume != 20 {
+		t.Fatalf("cmd %+v", cmd)
+	}
+
+	for _, body := range []any{
+		map[string]any{"pool": "all"}, // no target
+		map[string]any{"area": "office", "player": "media_player.x", "pool": "all"}, // two targets
+		map[string]any{"area": "office", "media": " "},                              // no media
+		map[string]any{"area": "office", "media": "x", "source": "event"},           // source is not client input
+		"{",
+	} {
+		wantJSONError(t, e.do(t, "POST", "/api/play", body), http.StatusBadRequest)
+	}
+	if len(e.play.cmds) != 1 {
+		t.Fatalf("bad requests reached the player: %+v", e.play.cmds)
+	}
+
+	for err, code := range map[error]int{
+		fmt.Errorf("pick: %w: kitchen", pools.ErrNotFound):       http.StatusNotFound,
+		fmt.Errorf("%w: kitchen", rooms.ErrUnknownArea):          http.StatusNotFound,
+		fmt.Errorf("%w: light.x", rooms.ErrUnsupportedEntity):    http.StatusBadRequest,
+		fmt.Errorf("%w: volume 120", scan.ErrInvalid):            http.StatusBadRequest,
+		fmt.Errorf("pool kitchen: %w", scan.ErrNestedPool):       http.StatusConflict,
+		fmt.Errorf("pool \"all\": %w", scan.ErrEmptyPool):        http.StatusConflict,
+		fmt.Errorf("%w: media_player.x", rooms.ErrUnknownEntity): http.StatusNotFound,
+		errors.New("speaker offline"):                            http.StatusBadGateway,
+	} {
+		e.play.err = err
+		wantJSONError(t, e.do(t, "POST", "/api/play", map[string]any{"area": "kitchen", "pool": "kitchen"}), code)
+	}
+}
+
+func TestStop(t *testing.T) {
+	e := newEnv(t, false)
+
+	w := e.do(t, "POST", "/api/stop", map[string]any{"player": "media_player.office"})
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[playResponse](t, w); got.Player != "sonos" {
+		t.Fatalf("result %+v", got)
+	}
+	if len(e.play.stops) != 1 || e.play.stops[0].Entity != "media_player.office" {
+		t.Fatalf("stops %+v", e.play.stops)
+	}
+	wantJSONError(t, e.do(t, "POST", "/api/stop", map[string]any{}), http.StatusBadRequest)
+	e.play.err = errors.New("HA down")
+	wantJSONError(t, e.do(t, "POST", "/api/stop", map[string]any{"area": "office"}), http.StatusBadGateway)
+	e.play.err = fmt.Errorf("%w: no target", scan.ErrInvalid)
+	wantJSONError(t, e.do(t, "POST", "/api/stop", map[string]any{"area": "office"}), http.StatusBadRequest)
 }
 
 func TestEmptyListIsArray(t *testing.T) {
@@ -468,6 +621,19 @@ func TestScans(t *testing.T) {
 	}
 	if got[0]["result"] != "no_match" {
 		t.Fatalf("scan fields not flattened: %+v", got[0])
+	}
+
+	e.scans.Add(model.Scan{Source: model.SourceEvent, TagName: "pool kitchen", PoolID: "kitchen", Media: "x", Result: model.ScanStopped})
+	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
+	if got[0]["source"] != "event" || got[0]["pool_id"] != "kitchen" || got[0]["result"] != "stopped" {
+		t.Fatalf("event scan %+v", got[0])
+	}
+
+	// An event's description is not a tag name, even when it equals one.
+	e.scans.Add(model.Scan{Source: model.SourceUI, TagName: "Old", Media: "Old", Result: model.ScanNoMatch})
+	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
+	if got[0]["matches_entry"] != "" {
+		t.Fatalf("ui scan resolved to %v", got[0]["matches_entry"])
 	}
 }
 
@@ -756,7 +922,7 @@ func TestUI(t *testing.T) {
 		}
 	}
 
-	for _, f := range []string{"app.js", "lib.js", "fuzzy.js", "tags.js", "scans.js", "print.js", "templates.js", "backgrounds.js", "settings.js"} {
+	for _, f := range []string{"app.js", "lib.js", "fuzzy.js", "tags.js", "pools.js", "scans.js", "print.js", "templates.js", "backgrounds.js", "settings.js"} {
 		w := e.do(t, "GET", "/"+f, nil)
 		wantStatus(t, w, http.StatusOK)
 		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {

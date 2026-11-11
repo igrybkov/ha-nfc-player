@@ -13,6 +13,9 @@ runs on `amd64` and `aarch64`.
 - Native Sonos playback from Apple Music links. Music Assistant is the
   fallback.
 - Per-room volume and per-tag shuffle, repeat and volume.
+- Pools: a tag, button or dashboard tile plays a random album from a list.
+- Play and stop from any automation with the `nfc_player_play` and
+  `nfc_player_stop` events.
 - Tag registry in a web UI in the Home Assistant sidebar (Ingress).
 - Recent scans list, to see what matched and what failed.
 - Label printing to PDF. Layouts, templates and backgrounds are pluggable.
@@ -28,7 +31,8 @@ runs on `amd64` and `aarch64`.
 4. Find **NFC Player** in the store and install it.
 5. Start it and open **NFC Player** in the sidebar.
 
-See [nfc_player/DOCS.md](nfc_player/DOCS.md) for options and files.
+See [nfc_player/DOCS.md](nfc_player/DOCS.md) for options, files, and the
+play events with automation examples.
 
 ## Develop
 

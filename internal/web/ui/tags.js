@@ -1,10 +1,9 @@
 // Tags screen: searchable entry list and the entry editor.
 import {
   h, get, post, put, del, toast, run, highlight, thumb, artURL, bumpArt, searchList,
-  field, num, readNum, select, confirmDelete, splitName, focusIfDesktop,
+  field, num, readNum, select, confirmDelete, splitName, focusIfDesktop, playerNames, areaSelect,
 } from './lib.js';
-
-const KNOWN_PLAYERS = ['sonos', 'music_assistant'];
+import { ALL, poolName } from './pools.js';
 
 export async function render(view, rest, params) {
   if (rest[0] === 'new') return editor(view, null, params);
@@ -18,8 +17,12 @@ function kindOf(url) {
   return m ? m[1] : 'link';
 }
 
+// getPools lists stored pools. A failure only costs pool names, so the
+// tags screens still work.
+const getPools = () => get('api/pools').then((r) => r.pools).catch(() => []);
+
 async function list(view) {
-  const entries = await get('api/tags');
+  const [entries, pools] = await Promise.all([get('api/tags'), getPools()]);
   const sl = searchList({
     items: entries,
     text: (e) => e.name,
@@ -30,9 +33,9 @@ async function list(view) {
       h('div', { class: 'grow' },
         h('div', { class: 'title' }, highlight(e.name, pos)),
         h('div', { class: 'muted small' },
-          kindOf(e.url),
-          e.shuffle && ' · shuffle',
-          e.repeat !== 'all' && ` · repeat ${e.repeat}`,
+          e.pool ? `pool ${poolName(pools, e.pool)}` : kindOf(e.url),
+          !e.pool && e.shuffle && ' · shuffle',
+          !e.pool && e.repeat !== 'all' && ` · repeat ${e.repeat}`,
           e.volume != null && ` · vol ${e.volume}`,
           e.tag_ids.length > 0 && ` · ${e.tag_ids.length} tag id${e.tag_ids.length > 1 ? 's' : ''}`)),
     ),
@@ -51,13 +54,13 @@ async function list(view) {
 function blankEntry(params) {
   return {
     id: '', name: params.get('name') || '', tag_ids: params.get('tag_id') ? [params.get('tag_id')] : [],
-    url: '', shuffle: false, repeat: 'all', volume: null, player: null,
+    url: '', pool: '', shuffle: false, repeat: 'all', volume: null, player: null,
     label: { title: null, subtitle: null, artwork: null },
   };
 }
 
 async function editor(view, id, params) {
-  const [entries, settings] = await Promise.all([get('api/tags'), get('api/settings')]);
+  const [entries, settings, pools] = await Promise.all([get('api/tags'), get('api/settings'), getPools()]);
   const entry = id ? entries.find((e) => e.id === id) : blankEntry(params);
   if (!entry) {
     view.replaceChildren(h('p', { class: 'error', text: `No tag with id ${id}.` }), h('a', { href: '#/tags', text: 'Back to tags' }));
@@ -69,11 +72,29 @@ async function editor(view, id, params) {
   // the scheme). The server validates the link.
   const url = h('input', { value: entry.url, type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false',
     required: true, placeholder: 'https://music.apple.com/…' });
+  // A tag plays a URL or a pool. A pool picks shuffle and repeat itself.
+  const source = select([['url', 'Music URL'], ['pool', 'Pool']], entry.pool ? 'pool' : 'url', { 'aria-label': 'Plays' });
+  const poolOpts = [[ALL.id, ALL.name], ...pools.map((p) => [p.id, p.name])];
+  if (entry.pool && !poolOpts.some(([v]) => v === entry.pool)) poolOpts.push([entry.pool, poolName(pools, entry.pool)]);
+  const pool = select(poolOpts, entry.pool || ALL.id);
   const shuffle = h('input', { type: 'checkbox', checked: entry.shuffle });
   const repeat = select([['all', 'All'], ['one', 'One'], ['off', 'Off']], entry.repeat);
   const volume = num(entry.volume, { min: 0, max: 100, step: 1, placeholder: 'Room default' });
-  const players = [...new Set([...settings.players.default, ...KNOWN_PLAYERS])];
-  const player = select([['', 'Default chain'], ...players.map((p) => [p, p])], entry.player ?? '');
+  const player = select([['', 'Default chain'], ...playerNames(settings).map((p) => [p, p])], entry.player ?? '');
+  const urlField = field('Music URL', url, 'Apple Music link or apple_music:// URI.');
+  const poolField = field('Pool', pool, 'Plays a random item of the pool. Edit pools on the Pools tab.');
+  const shuffleField = h('label', { class: 'check' }, shuffle, ' Shuffle');
+  const repeatField = field('Repeat', repeat);
+  const syncSource = () => {
+    const isPool = source.value === 'pool';
+    urlField.hidden = isPool;
+    url.required = !isPool; // a hidden required field blocks submit
+    poolField.hidden = !isPool;
+    shuffleField.hidden = isPool;
+    repeatField.hidden = isPool;
+  };
+  source.addEventListener('change', syncSource);
+  syncSource();
   const title = h('input', { value: entry.label.title ?? '', placeholder: '' });
   const subtitle = h('input', { value: entry.label.subtitle ?? '', placeholder: '' });
   const artwork = h('input', { value: entry.label.artwork ?? '', placeholder: 'Automatic' });
@@ -122,17 +143,16 @@ async function editor(view, id, params) {
   showArt(false);
 
   // Test play.
-  const area = h('select', { 'aria-label': 'Area' }, h('option', { value: '', text: 'Loading areas…' }));
-  get('api/ha/areas').then((areas) => {
-    area.replaceChildren(...areas.map((a) => h('option', { value: a.id }, a.name)));
-  }).catch((e) => area.replaceChildren(h('option', { value: '', text: `Areas unavailable: ${e.message}` })));
+  const area = areaSelect();
 
   const opt = (input) => (input.value.trim() === '' ? null : input.value.trim());
   const collect = () => ({
     id: entry.id,
     name: name.value,
     tag_ids: tagIDs,
-    url: url.value,
+    // Exactly one of url and pool; the other is sent empty so a switch sticks.
+    url: source.value === 'url' ? url.value : '',
+    pool: source.value === 'pool' ? pool.value : '',
     shuffle: shuffle.checked,
     repeat: repeat.value,
     volume: readNum(volume),
@@ -157,10 +177,12 @@ async function editor(view, id, params) {
   h('div', { class: 'cols' },
     h('div', { class: 'stack' },
       field('Name', name, 'Matched against the HA tag name. Text after "|" is ignored.'),
-      field('Music URL', url, 'Apple Music link or apple_music:// URI.'),
+      field('Plays', source),
+      urlField,
+      poolField,
       h('div', { class: 'grid3' },
-        h('label', { class: 'check' }, shuffle, ' Shuffle'),
-        field('Repeat', repeat),
+        shuffleField,
+        repeatField,
         field('Volume %', volume)),
       field('Player', player),
       h('fieldset', {}, h('legend', { text: 'Linked HA tag IDs' }),
@@ -190,5 +212,5 @@ async function editor(view, id, params) {
     } })));
 
   view.replaceChildren(form);
-  focusIfDesktop(id ? url : name);
+  focusIfDesktop(id ? (entry.pool ? name : url) : name);
 }

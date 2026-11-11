@@ -61,6 +61,26 @@ var testEntries = entries{
 	{ID: "disturbed-divisible", Name: "Disturbed — Divisible", URL: disturbedURL, Volume: ptr(50), TagIDs: []string{}},
 	{ID: "queen", Name: "Queen — Bohemian Rhapsody", URL: queenURL, Repeat: model.RepeatOne, TagIDs: []string{"tag-queen"}},
 	{ID: "on-ma", Name: "On MA", URL: disturbedURL, Player: ptr("music_assistant"), TagIDs: []string{}},
+	{ID: "kitchen-tag", Name: "Kitchen", Pool: "kitchen", Volume: ptr(55), Shuffle: false, Repeat: model.RepeatOff, TagIDs: []string{"tag-kitchen"}},
+	{ID: "nested-tag", Name: "Nested", Pool: "nested", TagIDs: []string{}},
+}
+
+// poolMap is a minimal model.PoolLookup.
+type poolMap map[string]model.Pool
+
+func (m poolMap) Pool(id string) (model.Pool, bool) {
+	p, ok := m[id]
+	return p, ok
+}
+
+var testPools = poolMap{
+	// Settings: shuffle from the item, repeat one, volume 40.
+	"kitchen": {ID: "kitchen", Name: "Kitchen", Repeat: ptr(model.RepeatOne), Volume: ptr(40), Items: []model.PoolItem{
+		{Tag: "metallica-essential"}, {Media: queenURL}, {Media: "Volodymyr Ivasiuk"},
+	}},
+	"nested":  {ID: "nested", Name: "Nested", Items: []model.PoolItem{{Tag: "kitchen-tag"}}},
+	"missing": {ID: "missing", Name: "Missing", Items: []model.PoolItem{{Tag: "deleted"}}},
+	"empty":   {ID: "empty", Name: "Empty", Items: []model.PoolItem{}},
 }
 
 func fakeHA() *hatest.Fake {
@@ -90,6 +110,8 @@ func fakeHA() *hatest.Fake {
 			{EntityID: "media_player.office", DeviceID: "era", Platform: "sonos"},
 			{EntityID: "media_player.garage", DeviceID: "port", Platform: "sonos"},
 			{EntityID: "media_player.family_room_ma", Platform: "music_assistant", AreaID: "family_room", ConfigEntryID: "ma-entry"},
+			{EntityID: "media_player.portable_ma", Platform: "music_assistant", ConfigEntryID: "ma-entry"}, // no area
+			{EntityID: "media_player.tv", DeviceID: "era", Platform: "cast"},
 		},
 	}
 }
@@ -115,7 +137,7 @@ func startWith(t *testing.T, f *hatest.Fake, roomsHA ha.Client, setup func(*Hand
 	ma := musicassistant.New(f, s)
 	router := player.NewRouter(s, ma, sonos.New(f, nil), ma)
 	ring := NewRing(LogSize)
-	h := New(Deps{HA: f, Entries: testEntries, Settings: s, Rooms: rs, Router: router, Log: ring, Logger: slog.New(slog.DiscardHandler)})
+	h := New(Deps{HA: f, Entries: testEntries, Pools: testPools, Settings: s, Rooms: rs, Router: router, Log: ring, Logger: slog.New(slog.DiscardHandler)})
 	if setup != nil {
 		setup(h)
 	}
@@ -124,7 +146,9 @@ func startWith(t *testing.T, f *hatest.Fake, roomsHA ha.Client, setup func(*Hand
 	go func() { done <- h.Run(ctx) }()
 	hs := &harness{f: f, h: h, ring: ring, cancel: cancel, done: done}
 	t.Cleanup(hs.stop)
-	waitFor(t, "subscription", func() bool { return f.Subscribers(EventType) == 1 })
+	waitFor(t, "subscriptions", func() bool {
+		return f.Subscribers(EventType) == 1 && f.Subscribers(PlayEventType) == 1 && f.Subscribers(StopEventType) == 1
+	})
 	return hs
 }
 

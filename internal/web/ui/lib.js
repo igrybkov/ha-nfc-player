@@ -105,9 +105,12 @@ export function bumpArt(id) {
   artBumps.set(id, Date.now());
 }
 
-// artURL changes when the art source (url, override) or a refresh changes it.
+// artURL changes when the art source (url, pool, override) or a refresh
+// changes it. A pool entry's art comes from the pool's first item, so pool
+// saves bump it too (see pools.js).
 export function artURL(entry, size) {
-  const v = hash(`${entry.url}|${entry.label?.artwork ?? ''}`);
+  const src = `${entry.url}|${entry.label?.artwork ?? ''}`;
+  const v = hash(entry.pool ? `${src}|${entry.pool}` : src);
   const bump = artBumps.get(entry.id);
   return `api/tags/${encodeURIComponent(entry.id)}/artwork?size=${size}&v=${v}${bump ? `&r=${bump}` : ''}`;
 }
@@ -119,17 +122,24 @@ function hash(s) {
 }
 
 // Thumbnails are reused by URL, so a list re-render (search, selection)
-// moves the loaded image instead of fetching it again. A node that is still
-// on the page is never stolen; a second copy gets a fresh element.
-const thumbs = new Map();
+// moves the loaded image instead of fetching it again. A node that is on the
+// page, or already handed out in this render, is never reused: two copies
+// of one entry (print copies, a tag twice in a pool) get two elements.
+const thumbs = new Map(); // src → img[]
+const claimed = new Set(); // handed out since the current task began
 
 export function thumb(entry, size = 48) {
   const src = artURL(entry, size * 2);
-  const cached = thumbs.get(src);
-  if (cached && !cached.isConnected) return cached;
-  const img = h('img', { class: 'thumb', loading: 'lazy', alt: '', width: size, height: size, src });
-  img.addEventListener('error', () => img.classList.add('missing'), { once: true });
-  thumbs.set(src, img);
+  if (!claimed.size) queueMicrotask(() => claimed.clear());
+  const pool = thumbs.get(src) ?? [];
+  let img = pool.find((n) => !n.isConnected && !claimed.has(n));
+  if (!img) {
+    img = h('img', { class: 'thumb', loading: 'lazy', alt: '', width: size, height: size, src });
+    img.addEventListener('error', () => img.classList.add('missing'), { once: true });
+    pool.push(img);
+    thumbs.set(src, pool);
+  }
+  claimed.add(img);
   return img;
 }
 
@@ -223,6 +233,23 @@ export function readNum(input) {
 
 export function select(options, value, attrs = {}) {
   return h('select', attrs, options.map(([v, label]) => h('option', { value: v, selected: v === value }, label)));
+}
+
+const KNOWN_PLAYERS = ['sonos', 'music_assistant'];
+
+// playerNames lists the players to offer as an override: the settings
+// chain first, then any known player not in it.
+export function playerNames(settings) {
+  return [...new Set([...settings.players.default, ...KNOWN_PLAYERS])];
+}
+
+// areaSelect is a select of HA areas. It fills in when api/ha/areas answers.
+export function areaSelect() {
+  const sel = h('select', { 'aria-label': 'Area' }, h('option', { value: '', text: 'Loading areas…' }));
+  get('api/ha/areas').then((areas) => {
+    sel.replaceChildren(...areas.map((a) => h('option', { value: a.id }, a.name)));
+  }).catch((e) => sel.replaceChildren(h('option', { value: '', text: `Areas unavailable: ${e.message}` })));
+  return sel;
 }
 
 // focusIfDesktop focuses a field unless the device is touch-first, where it

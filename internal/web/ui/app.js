@@ -1,6 +1,7 @@
 // Entry point: hash router. Each screen module exports
 // render(view, params) and may return a cleanup function.
 import * as tags from './tags.js';
+import * as pools from './pools.js';
 import * as scans from './scans.js';
 import * as print from './print.js';
 import * as templates from './templates.js';
@@ -8,7 +9,7 @@ import * as backgrounds from './backgrounds.js';
 import * as settings from './settings.js';
 import { h } from './lib.js';
 
-const screens = { tags, scans, print, templates, backgrounds, settings };
+const screens = { tags, pools, scans, print, templates, backgrounds, settings };
 let cleanup = null;
 let seq = 0;
 
