@@ -131,6 +131,27 @@ func (s *Server) mediaArtwork(w http.ResponseWriter, r *http.Request) {
 	s.serveArtwork(w, r, model.Subject{Name: u, URL: u})
 }
 
+// mediaTitle answers the name a music service shows for a media link,
+// so the editor can show "Deep Focus" instead of the link.
+func (s *Server) mediaTitle(w http.ResponseWriter, r *http.Request) {
+	u := r.URL.Query().Get("url")
+	if !records.IsURL(u) {
+		s.writeErr(w, r, badRequest("url must be a music link"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), artworkTimeout)
+	defer cancel()
+	title, err := s.deps.Titles.Title(ctx, u)
+	if err != nil {
+		s.log.Debug("web: no media title", "url", u, "err", err)
+		writeError(w, http.StatusNotFound, fmt.Sprintf("no title: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Title string `json:"title"`
+	}{title})
+}
+
 // serveArtwork writes the subject's art as a JPEG: size (px) scales it
 // down, and refresh=1 looks it up again.
 func (s *Server) serveArtwork(w http.ResponseWriter, r *http.Request, sub model.Subject) {

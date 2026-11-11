@@ -55,6 +55,9 @@ type Record struct {
 type RecordItem struct {
 	Media  string `yaml:"media,omitempty" json:"media,omitempty"`   // see PlayCommand.Media
 	Record string `yaml:"record,omitempty" json:"record,omitempty"` // another record's id
+	// Name is what the editor shows for a media link ("Deep Focus"),
+	// filled from the music service when the link is added. Display only.
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
 }
 
 // Shuffle says per media kind whether to shuffle. Nil takes the default:

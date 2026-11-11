@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"image"
 	"net/http"
@@ -103,6 +104,7 @@ func (s *Server) itemCandidates(ctx context.Context, rec model.Record) []pickerI
 	var wg sync.WaitGroup
 	for i, it := range items {
 		var sub model.Subject
+		label := it.Name // shown under the image; the subject keeps the link, its art cache key
 		switch {
 		case it.Record != "":
 			sr, err := s.deps.Records.Get(it.Record)
@@ -110,6 +112,7 @@ func (s *Server) itemCandidates(ctx context.Context, rec model.Record) []pickerI
 				continue
 			}
 			sub = s.deps.Records.Subject(sr)
+			label = sr.Name
 		case records.IsURL(it.Media):
 			sub = model.Subject{Name: it.Media, URL: it.Media}
 		default:
@@ -135,7 +138,7 @@ func (s *Server) itemCandidates(ctx context.Context, rec model.Record) []pickerI
 			default:
 				preview = "api/artwork/media?url=" + url.QueryEscape(sub.URL)
 			}
-			found[i] = pickerItem{Candidate: artwork.Candidate{URL: u, Label: sub.Name, Kind: "item"}, Preview: preview}
+			found[i] = pickerItem{Candidate: artwork.Candidate{URL: u, Label: cmp.Or(label, sub.Name), Kind: "item"}, Preview: preview}
 		}()
 	}
 	wg.Wait()

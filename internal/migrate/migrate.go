@@ -20,7 +20,7 @@ import (
 )
 
 // Current is the schema version this build reads and writes.
-const Current = 3
+const Current = 4
 
 // Files are the names of every file in config_dir, of every version.
 var Files = []string{
@@ -33,7 +33,7 @@ var Files = []string{
 }
 
 // Steps takes version i+1 to i+2 at index i.
-var Steps = []store.Step{v1to2, v2to3}
+var Steps = []store.Step{v1to2, v2to3, v3to4}
 
 // Open returns the set of files in dir.
 func Open(dir string, log *slog.Logger) *store.Set {

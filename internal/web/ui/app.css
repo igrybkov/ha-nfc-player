@@ -107,6 +107,11 @@ legend { padding: 0 4px; font-weight: 600; }
 .row { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .title { font-weight: 500; overflow-wrap: anywhere; }
 a.title { color: var(--fg); }
+a.link { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.link { overflow-wrap: anywhere; }
+/* A link's name, edited in place: reads like a title until focused. */
+input.item-name { width: 100%; min-height: 32px; padding: 4px 6px; font-weight: 500; border-color: transparent; background: transparent; }
+input.item-name:hover, input.item-name:focus { border-color: var(--line); background: var(--card); }
 .thumb { width: 48px; height: 48px; border-radius: 4px; object-fit: cover; background: var(--line); flex: none; }
 .row .thumb[width="32"] { width: 32px; height: 32px; }
 .thumb.missing, .art.missing { visibility: hidden; }

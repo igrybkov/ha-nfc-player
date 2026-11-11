@@ -3,6 +3,7 @@ package records
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/igrybkov/ha-nfc-player/internal/model"
@@ -274,5 +275,17 @@ func TestDedupe(t *testing.T) {
 	}
 	if got, _ := New(f).Get("x"); len(got.Items) != 1 {
 		t.Errorf("read %+v", got.Items)
+	}
+}
+
+func TestItemNames(t *testing.T) {
+	s := newStore(t)
+	r := mustCreate(t, s, model.Record{Name: "Focus", Items: []model.RecordItem{{Media: listURL, Name: "  Deep Focus "}}})
+	if got, _ := s.Get(r.ID); got.Items[0].Name != "Deep Focus" {
+		t.Errorf("name %q", got.Items[0].Name)
+	}
+	long := strings.Repeat("x", 201)
+	if _, err := s.Create(model.Record{Name: "Long", Items: []model.RecordItem{{Media: listURL, Name: long}}}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("long name: %v", err)
 	}
 }

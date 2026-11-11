@@ -37,6 +37,7 @@ type fakeApple struct {
 	gate   chan struct{}     // when set, /search waits for it to close
 	status int               // when set, /search and /lookup answer with it
 	oembed map[string]string // Spotify share URL → thumbnail_url; missing = 404
+	titles map[string]string // Spotify share URL → oEmbed title
 	bodies map[string]string // path → raw HTML, served before pages
 }
 
@@ -70,7 +71,7 @@ func (f *fakeApple) serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r) // what Spotify answers for an unknown id
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"type": "rich", "thumbnail_url": thumb, "thumbnail_width": 300})
+		json.NewEncoder(w).Encode(map[string]any{"type": "rich", "thumbnail_url": thumb, "thumbnail_width": 300, "title": f.titles[r.URL.Query().Get("url")]})
 	case r.URL.Path == "/lookup":
 		results(f.lookup[r.URL.Query().Get("id")])
 	case r.URL.Path == "/search":
@@ -122,6 +123,7 @@ func (f *fakeApple) cache(t *testing.T) *Cache {
 	return &Cache{
 		Dir: t.TempDir(), ConfigDir: t.TempDir(), HTTP: f.srv.Client(), ITunesURL: f.srv.URL,
 		OEmbedURL:    f.srv.URL + "/oembed",
+		EmbedURL:     f.srv.URL + "/embed",
 		AllowHost:    func(host string) bool { return host == "127.0.0.1" },
 		allowPrivate: true,
 	}

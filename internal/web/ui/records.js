@@ -34,6 +34,19 @@ function itemKey(it) {
   return `text:${m.toLowerCase().split(/\s+/).join(' ')}`;
 }
 
+// The music service's name for each media link: asked once per link per
+// page load (titles), and kept once known (known) so a save can store it.
+const titles = new Map();
+const known = new Map();
+function lookupTitle(media) {
+  const u = media.trim();
+  if (!titles.has(u)) {
+    titles.set(u, get(`api/media/title?url=${encodeURIComponent(u)}`)
+      .then((r) => { known.set(u, r.title); return r.title; }, () => ''));
+  }
+  return titles.get(u);
+}
+
 // mediaThumb is the art of a media link, as thumb() shows a record's.
 function mediaThumb(media, size = 32) {
   const img = h('img', {
@@ -213,11 +226,23 @@ async function editor(view, id, params) {
 
   // Items. A record item whose record was deleted stays in the list,
   // marked, so the user sees why the server refuses it and removes it.
-  const items = (record.items ?? []).map((i) => (i.record ? { record: i.record } : { media: i.media }));
+  const items = (record.items ?? []).map((i) => (i.record ? { record: i.record } : { media: i.media, name: i.name ?? '' }));
   const itemList = h('ol', { class: 'list plain items' });
   const move = (i, d) => {
     [items[i], items[i + d]] = [items[i + d], items[i]];
     drawItems();
+  };
+  // nameInput edits a link's name. An item saved without one shows the
+  // service's name greyed out; Save stores it (see collect).
+  const nameInput = (it) => {
+    const u = it.media.trim();
+    const input = h('input', { class: 'item-name', value: it.name ?? '', placeholder: known.get(u) ?? '', 'aria-label': 'Name', spellcheck: 'false',
+      // Not a login field: keep password managers out of it.
+      autocomplete: 'off', 'data-1p-ignore': '', 'data-lpignore': 'true' });
+    input.addEventListener('input', () => { it.name = input.value; });
+    // No name from the service: ask for one, or the row shows only a link.
+    if (!it.name) lookupTitle(u).then((t) => { input.placeholder = t || 'Add a name'; });
+    return input;
   };
   const itemRow = (it, i) => {
     const r = it.record ? byID.get(it.record) : null;
@@ -226,9 +251,16 @@ async function editor(view, id, params) {
         h('div', { class: 'title', text: r ? r.name : it.record }),
         r ? h('div', { class: 'muted small', text: 'record' })
           : h('div', { class: 'error small', text: 'record not found, remove it to save' }))
-      : h('div', { class: 'grow' },
-        h('div', { class: 'title', text: it.media }),
-        h('div', { class: 'muted small', text: 'media' }));
+      : isURL(it.media)
+        // An editable name, with the link kept below it to check or open.
+        ? h('div', { class: 'grow' },
+          nameInput(it),
+          /^https?:\/\//i.test(it.media.trim())
+            ? h('a', { class: 'muted small link', href: it.media.trim(), target: '_blank', rel: 'noopener noreferrer', text: it.media.trim() })
+            : h('div', { class: 'muted small link', text: it.media.trim() }))
+        : h('div', { class: 'grow' },
+          h('div', { class: 'title', text: it.media }),
+          h('div', { class: 'muted small', text: 'search' }));
     const art = r ? thumb(r, 32) : it.media && isURL(it.media) ? mediaThumb(it.media) : h('span', { class: 'thumb s32' });
     return h('li', {}, h('div', { class: 'row' }, art, text,
       h('button', { type: 'button', class: 'icon', 'aria-label': 'Move up', text: '↑', disabled: i === 0, onclick: () => move(i, -1) }),
@@ -252,6 +284,12 @@ async function editor(view, id, params) {
     }
     items.push(it);
     drawItems();
+    // A new link gets its name from the service, unless typed in meanwhile.
+    if (it.media && isURL(it.media)) {
+      lookupTitle(it.media).then((t) => {
+        if (t && !it.name && items.includes(it)) { it.name = t; drawItems(); }
+      });
+    }
     return true;
   };
 
@@ -270,7 +308,7 @@ async function editor(view, id, params) {
   const media = h('input', { autocomplete: 'off', spellcheck: 'false', placeholder: 'URL, Artist — Album, or a name' });
   const addMedia = () => {
     const v = media.value.trim();
-    if (!v || !add({ media: v })) return;
+    if (!v || !add({ media: v, name: '' })) return;
     media.value = '';
   };
   media.addEventListener('keydown', (e) => {
@@ -280,11 +318,16 @@ async function editor(view, id, params) {
   const area = areaSelect();
 
   const opt = (input) => (input.value.trim() === '' ? null : input.value.trim());
-  const collect = () => ({
+  // fill stores a looked-up name for links saved without one. Only Save
+  // fills: opening a record must not count as a change.
+  const collect = (fill = false) => ({
     id: rid.value.trim(),
     name: name.value,
     aliases: record.aliases ?? [],
-    items,
+    items: items.map((it) => (it.record ? { record: it.record } : {
+      media: it.media,
+      name: (it.name ?? '').trim() || (fill && isURL(it.media) ? known.get(it.media.trim()) ?? '' : ''),
+    })),
     shuffle: Object.fromEntries(shuffles.map(([k, box]) => [k, box.checked])),
     repeat: repeat.value || null,
     volume_offset: readNum(volume),
@@ -306,7 +349,7 @@ async function editor(view, id, params) {
   const form = h('form', { class: 'editor', oninput: checkDirty, onchange: checkDirty, onsubmit: (ev) => {
     ev.preventDefault();
     run(save, async () => {
-      const body = collect();
+      const body = collect(true);
       const done = id ? await put(`api/records/${encodeURIComponent(id)}`, body) : await post('api/records', body);
       saved = null;
       // Records that list this one show its art too.

@@ -276,7 +276,7 @@ func newEnv(t *testing.T, supervisor bool) *testEnv {
 	}
 	e.h = New(Deps{
 		Records: e.recs, Settings: e.settings, Templates: tpls, Backgrounds: bgs,
-		Play: e.play, Scans: e.scans, Artwork: e.art, HATags: e.tags, Labels: e.lbl, ArtPicker: e.picker,
+		Play: e.play, Scans: e.scans, Artwork: e.art, HATags: e.tags, Labels: e.lbl, ArtPicker: e.picker, Titles: e.picker,
 		Supervisor: supervisor,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}).Handler()
@@ -1264,4 +1264,22 @@ func TestArtPicker(t *testing.T) {
 	}
 	wantJSONError(t, e.do(t, "GET", "/api/artwork/preview", nil), http.StatusNotFound)
 	wantJSONError(t, e.do(t, "GET", "/api/artwork/preview?url=x&size=1", nil), http.StatusBadRequest)
+}
+
+func (f *fakePicker) Title(_ context.Context, u string) (string, error) {
+	if strings.Contains(u, "nameless") {
+		return "", errors.New("no title")
+	}
+	return "Name of " + u, nil
+}
+
+func TestMediaTitle(t *testing.T) {
+	e := newEnv(t, false)
+	w := e.do(t, "GET", "/api/media/title?url="+url.QueryEscape("https://open.spotify.com/playlist/x"), nil)
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[map[string]string](t, w); got["title"] != "Name of https://open.spotify.com/playlist/x" {
+		t.Fatalf("got %+v", got)
+	}
+	wantJSONError(t, e.do(t, "GET", "/api/media/title?url="+url.QueryEscape("https://open.spotify.com/playlist/nameless"), nil), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "GET", "/api/media/title?url=Cat+Stevens", nil), http.StatusBadRequest)
 }

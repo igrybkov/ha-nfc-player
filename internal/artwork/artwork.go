@@ -82,6 +82,7 @@ var ErrTooLarge = errors.New("artwork: image too large")
 const (
 	DefaultITunesURL = "https://itunes.apple.com"
 	DefaultOEmbedURL = "https://open.spotify.com/oembed"
+	DefaultEmbedURL  = "https://open.spotify.com/embed"
 	DefaultUserAgent = "Mozilla/5.0 ha-nfc-player"
 	defaultTimeout   = 20 * time.Second
 
@@ -112,6 +113,7 @@ type Cache struct {
 	HTTP      *http.Client
 	ITunesURL string // default DefaultITunesURL; tests point it at httptest
 	OEmbedURL string // Spotify oEmbed endpoint; default DefaultOEmbedURL
+	EmbedURL  string // Spotify embed pages; default DefaultEmbedURL
 	UserAgent string // default DefaultUserAgent; Apple pages want a browser-like one
 	Logger    *slog.Logger
 	// AllowHost reports whether the lookup chain may fetch from host (lower
@@ -135,6 +137,7 @@ type Cache struct {
 	candMu    sync.Mutex
 	pageSets  map[string]linkSet    // art picker: ranked links, by page URL
 	linkCache map[string]linkResult // art picker: image of a linked page
+	titles    map[string]titleEntry // media link names, by service:kind:id
 }
 
 // flight is one resolution that concurrent callers for the same key wait on.
@@ -396,14 +399,48 @@ var spotifySizes = map[string]string{
 // spotifyArtwork asks Spotify oEmbed for the thumbnail of the media's
 // canonical share link. It needs no key and works for every Spotify kind.
 func (c *Cache) spotifyArtwork(ctx context.Context, m catalog.Media) (string, error) {
-	share := m.ShareURL()
-	var data struct {
-		ThumbnailURL string `json:"thumbnail_url"`
+	data, err := c.spotifyOEmbed(ctx, m)
+	if err != nil {
+		return "", err
 	}
-	if err := c.getJSON(ctx, c.oembedURL()+"?url="+url.QueryEscape(share), &data); err != nil {
-		return "", fmt.Errorf("spotify oembed %s: %w", share, err)
+	if data.ThumbnailURL == "" {
+		// Spotify's own playlists (Deep Focus) come without a thumbnail.
+		return c.spotifyEmbedArtwork(ctx, m)
 	}
 	return spotifyFullSize(data.ThumbnailURL), nil
+}
+
+// oembed is the part of a Spotify oEmbed answer we use.
+type oembed struct {
+	Title        string `json:"title"`
+	ThumbnailURL string `json:"thumbnail_url"`
+}
+
+func (c *Cache) spotifyOEmbed(ctx context.Context, m catalog.Media) (oembed, error) {
+	share := m.ShareURL()
+	var data oembed
+	if err := c.getJSON(ctx, c.oembedURL()+"?url="+url.QueryEscape(share), &data); err != nil {
+		return data, fmt.Errorf("spotify oembed %s: %w", share, err)
+	}
+	return data, nil
+}
+
+// embedImage is a cover on Spotify's image CDN, as an embed page links it.
+var embedImage = regexp.MustCompile(`https://image-cdn-[a-z0-9-]+\.spotifycdn\.com/image/[0-9a-f]{40}`)
+
+// spotifyEmbedArtwork reads the cover from the media's embed page, the
+// player Spotify serves for iframes. It needs no key either.
+func (c *Cache) spotifyEmbedArtwork(ctx context.Context, m catalog.Media) (string, error) {
+	share, err := url.Parse(m.ShareURL())
+	if err != nil || share.Path == "" {
+		return "", nil
+	}
+	page := c.embedURL() + share.Path
+	body, err := c.get(ctx, page, maxPageBytes, true)
+	if err != nil {
+		return "", fmt.Errorf("spotify embed %s: %w", page, err)
+	}
+	return string(embedImage.Find(body)), nil
 }
 
 // spotifyImageID is one Spotify image id: a 16-hex size marker and 24 hex.
@@ -807,6 +844,13 @@ func (c *Cache) itunesURL() string {
 		return strings.TrimRight(c.ITunesURL, "/")
 	}
 	return DefaultITunesURL
+}
+
+func (c *Cache) embedURL() string {
+	if c.EmbedURL != "" {
+		return strings.TrimRight(c.EmbedURL, "/")
+	}
+	return DefaultEmbedURL
 }
 
 func (c *Cache) oembedURL() string {

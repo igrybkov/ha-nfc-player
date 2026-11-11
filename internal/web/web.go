@@ -43,9 +43,10 @@ type Deps struct {
 	Scans       model.ScanLog
 	Artwork     model.ArtworkSource
 	HATags      TagLister
-	ArtPicker   ArtPicker // nil = no art picker (routes answer 503)
-	Labels      Labels    // nil = package labels
-	Supervisor  bool      // accept only 172.30.32.2 and localhost
+	ArtPicker   ArtPicker   // nil = no art picker (routes answer 503)
+	Titles      TitleSource // nil = no media names (the route answers 503)
+	Labels      Labels      // nil = package labels
+	Supervisor  bool        // accept only 172.30.32.2 and localhost
 	Logger      *slog.Logger
 }
 
@@ -66,6 +67,22 @@ func New(d Deps) *Server {
 		s.lbl = labelsPkg{}
 	}
 	return s
+}
+
+// TitleSource names media links. *artwork.Cache satisfies it.
+type TitleSource interface {
+	Title(ctx context.Context, mediaURL string) (string, error)
+}
+
+// needTitles answers 503 when no TitleSource is wired.
+func (s *Server) needTitles(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Titles == nil {
+			writeError(w, http.StatusServiceUnavailable, "media names not available")
+			return
+		}
+		h(w, r)
+	}
 }
 
 // needPicker answers 503 when no ArtPicker is wired.
@@ -104,6 +121,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/records/{id}/artwork", s.recordArtwork)
 	mux.HandleFunc("GET /api/records/{id}/artwork/candidates", s.needPicker(s.recordArtCandidates))
 	mux.HandleFunc("GET /api/artwork/media", s.mediaArtwork)
+	mux.HandleFunc("GET /api/media/title", s.needTitles(s.mediaTitle))
 	mux.HandleFunc("GET /api/artwork/preview", s.needPicker(s.artPreview))
 	mux.HandleFunc("POST /api/play", s.play)
 	mux.HandleFunc("POST /api/stop", s.stop)

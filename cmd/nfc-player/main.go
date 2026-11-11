@@ -137,15 +137,18 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	})
 
 	art := opts.Artwork
-	var picker web.ArtPicker
+	var (
+		picker web.ArtPicker
+		titles web.TitleSource
+	)
 	if art == nil {
 		cache := &artwork.Cache{Dir: filepath.Join(cfg.DataDir, "cache"), ConfigDir: cfg.ConfigDir, Logger: log}
-		art, picker = cache, cache
+		art, picker, titles = cache, cache, cache
 	}
 
 	srv := web.New(web.Deps{
 		Records: recs, Settings: settings, Templates: templates, Backgrounds: backgrounds,
-		Play: handler, Scans: scans, Artwork: art, HATags: client, ArtPicker: picker,
+		Play: handler, Scans: scans, Artwork: art, HATags: client, ArtPicker: picker, Titles: titles,
 		Supervisor: cfg.Supervisor, Logger: log,
 	})
 	httpSrv := &http.Server{

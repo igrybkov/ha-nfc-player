@@ -86,6 +86,8 @@ history keeps the old files.
   An old volume becomes null (no offset), since it can't know the room;
   the log names each record that had one. It also dropped "all other
   records" items.
+- Version 4 (app 0.4.2) added item names. Nothing converts; an app of
+  version 3 can't write these files, so it can't drop the names.
 
 While a file does not parse, or comes from a newer app version, the app
 keeps using what it read last and refuses to save, so it never overwrites
@@ -126,7 +128,7 @@ can play a record or any album in one `event` action.
 Edit records on the **Records** tab, or by hand in `records.yaml`:
 
 ```yaml
-version: 3
+version: 4
 records:
   - id: kitchen
     name: Kitchen
@@ -135,6 +137,7 @@ records:
       - record: kenny-rogers-21-number-ones          # another record
       - media: Cat Stevens — Teaser and the Firecat  # any media text
       - media: https://music.apple.com/us/artist/the-dead-south/668262442
+        name: The Dead South                         # shown in the editor
     shuffle:
       albums: false     # null = default: albums play in order
       artists: null     # null = default: shuffle
@@ -156,6 +159,10 @@ records:
     Assistant searches for.
   - `record`: the id of another record. Records can hold records to any
     depth. A loop is skipped.
+- A link may have a `name`. The editor fills it from Spotify or Apple
+  when you add the link, and you can change it. It is only shown in the
+  editor. Spotify does not name private playlists or personal mixes; type
+  a name for those.
 - `volume_offset` (-100 to 100) is added to the volume of the area it plays
   in, so one record is louder or quieter everywhere. A play event's
   `volume` is a fixed volume and wins.

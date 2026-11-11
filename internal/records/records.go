@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
@@ -264,6 +265,8 @@ func validateItem(it model.RecordItem, all []model.Record, skip, self string) er
 	switch {
 	case set != 1:
 		return errors.New("set exactly one of media and record")
+	case utf8.RuneCountInString(it.Name) > maxItemName:
+		return fmt.Errorf("name is longer than %d characters", maxItemName)
 	case it.Record == self || it.Record == skip && skip != "":
 		return errors.New("a record can't hold itself")
 	case it.Record != "":
@@ -277,6 +280,9 @@ func validateItem(it model.RecordItem, all []model.Record, skip, self string) er
 	}
 	return nil
 }
+
+// maxItemName caps an item's display name.
+const maxItemName = 200
 
 // uriPrefix matches the start of a provider URI: apple_music:// and
 // spotify://, both also with a Music Assistant instance suffix
@@ -340,6 +346,7 @@ func normalize(r *model.Record) {
 	for i := range r.Items {
 		r.Items[i].Media = strings.TrimSpace(r.Items[i].Media)
 		r.Items[i].Record = strings.TrimSpace(r.Items[i].Record)
+		r.Items[i].Name = strings.TrimSpace(r.Items[i].Name)
 	}
 	for _, v := range []**string{&r.Player, &r.Label.Title, &r.Label.Subtitle, &r.Label.Artwork} {
 		if *v == nil {

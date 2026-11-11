@@ -7,6 +7,12 @@
   names match without regard to case or spacing. The editor refuses a
   duplicate; a file with duplicates plays without them and drops them on
   the next save.
+- Links in a record have a name ("Deep Focus" rather than the link). The
+  editor fills it from Spotify or Apple when you add a link; edit it in
+  place. The link stays below it, and opens on click. Older items show
+  the looked-up name greyed out until you save. Files move to version 4.
+- Spotify's own playlists that oEmbed gives no cover for now get their
+  cover from the embed player.
 
 ## 0.4.1
 

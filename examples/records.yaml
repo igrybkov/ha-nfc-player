@@ -5,7 +5,7 @@
 # A record plays when an HA tag with its name is scanned. Each item is media
 # (a URL, "Artist — Album", or a name to search), another record, or
 # "others: true" for every other record.
-version: 3
+version: 4
 records:
   - id: metallica-essential
     name: Metallica — Essential
