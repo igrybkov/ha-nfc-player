@@ -69,6 +69,9 @@ type Pool struct {
 	Repeat  *Repeat    `yaml:"repeat" json:"repeat"`
 	Volume  *int       `yaml:"volume" json:"volume"` // percent
 	Player  *string    `yaml:"player" json:"player"` // player name
+	// Label is for printing the pool's own label, and gives pool tags their
+	// art when they have none of their own.
+	Label LabelOverrides `yaml:"label" json:"label"`
 }
 
 // PoolItem is one pool item. Exactly one field is set.

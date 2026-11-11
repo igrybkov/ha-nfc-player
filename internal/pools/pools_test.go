@@ -307,6 +307,18 @@ func TestArtwork(t *testing.T) {
 		{"override wins", model.Entry{ID: "g", Pool: "kitchen", Label: model.LabelOverrides{Artwork: ptr("art.jpg")}}, ""},
 		{"URL entry", model.Entry{ID: "h", URL: southURL}, southURL},
 	}
+	// The pool's own override wins over its items.
+	withArt := model.Pool{Name: "With art", Items: []model.PoolItem{{Media: southURL}}, Label: model.LabelOverrides{Artwork: ptr(" pool.jpg ")}}
+	if _, err := s.Create(withArt); err != nil {
+		t.Fatal(err)
+	}
+	src := &recordArt{}
+	if _, err := (&Artwork{Pools: s, Source: src}).Artwork(context.Background(), AsEntry(model.Pool{ID: "with-art"}), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := src.got[0]; got.URL != "" || got.Label.Artwork == nil || *got.Label.Artwork != "pool.jpg" || got.ID != "pool:with-art" {
+		t.Errorf("pool override: source got %+v", got)
+	}
 	for _, tt := range tests {
 		src := &recordArt{}
 		a := &Artwork{Pools: s, Source: src}

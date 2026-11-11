@@ -262,14 +262,31 @@ func normalize(p *model.Pool) {
 		p.Items[i].Tag = strings.TrimSpace(p.Items[i].Tag)
 		p.Items[i].Media = strings.TrimSpace(p.Items[i].Media)
 	}
-	if p.Player != nil {
-		if v := strings.TrimSpace(*p.Player); v != "" {
-			p.Player = &v
-		} else {
-			p.Player = nil
-		}
+	for _, v := range []**string{&p.Player, &p.Label.Title, &p.Label.Subtitle, &p.Label.Artwork} {
+		trimPtr(v)
 	}
 	applyDefaults(p)
+}
+
+// trimPtr trims *v and turns an empty string into nil.
+func trimPtr(v **string) {
+	if *v == nil {
+		return
+	}
+	if t := strings.TrimSpace(**v); t != "" {
+		*v = &t
+	} else {
+		*v = nil
+	}
+}
+
+// RefPrefix marks a pool in a list of entry ids, such as a print job's.
+const RefPrefix = "pool:"
+
+// AsEntry turns a pool into an entry that plays it, so the label and art
+// code can treat it as one. Its id is RefPrefix + the pool id.
+func AsEntry(p model.Pool) model.Entry {
+	return model.Entry{ID: RefPrefix + p.ID, Name: p.Name, Pool: p.ID, Label: p.Label}
 }
 
 func entryByID(entries []model.Entry, id string) (model.Entry, bool) {
@@ -304,7 +321,7 @@ func uniqueID(base string, ps []model.Pool) string {
 }
 
 // Artwork wraps an ArtworkSource: a pool entry without label.artwork gets
-// the art of its pool's first item with a URL.
+// its pool's label.artwork, else the art of the pool's first item.
 type Artwork struct {
 	Pools  *Store
 	Source model.ArtworkSource
@@ -313,34 +330,37 @@ type Artwork struct {
 var _ model.ArtworkSource = (*Artwork)(nil)
 
 // Artwork passes e through, unless it is a pool entry without an artwork
-// override. Then Source gets a copy of e with the URL of the pool's first
-// item that has one: a tag item's entry URL, or a media item that parses.
-// A pool without such an item, or an unknown pool, passes e through.
+// override. Then Source gets a copy of e with the pool's artwork override,
+// or else with the art of the pool's first item that has some: a tag item's
+// entry (its override, else its URL), or a media item that parses. A pool
+// without such an item, or an unknown pool, passes e through.
 func (a *Artwork) Artwork(ctx context.Context, e model.Entry, refresh bool) (image.Image, error) {
 	if e.Pool != "" && e.Label.Artwork == nil {
-		if url := a.firstURL(e.Pool); url != "" {
-			e.URL = url
+		if p, ok := a.Pools.Pool(e.Pool); ok {
+			if p.Label.Artwork != nil {
+				e.Label.Artwork = p.Label.Artwork
+			} else if first, ok := a.first(p); ok {
+				e.URL, e.Label.Artwork = first.URL, first.Label.Artwork
+			}
 		}
 	}
 	return a.Source.Artwork(ctx, e, refresh)
 }
 
-func (a *Artwork) firstURL(poolID string) string {
-	p, ok := a.Pools.Pool(poolID)
-	if !ok {
-		return ""
-	}
+// first returns the pool's first item with art, as an entry: a tag item's
+// entry with a URL or an artwork override, or a media item that parses.
+func (a *Artwork) first(p model.Pool) (model.Entry, bool) {
 	entries := a.Pools.entries.All()
 	for _, it := range p.Items {
 		if it.Tag != "" {
-			if e, ok := entryByID(entries, it.Tag); ok && e.URL != "" {
-				return e.URL
+			if e, ok := entryByID(entries, it.Tag); ok && (e.URL != "" || e.Label.Artwork != nil) {
+				return e, true
 			}
 			continue
 		}
 		if _, err := catalog.Parse(it.Media); err == nil {
-			return it.Media
+			return model.Entry{Name: it.Media, URL: it.Media}, true
 		}
 	}
-	return ""
+	return model.Entry{}, false
 }

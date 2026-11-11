@@ -1,7 +1,7 @@
 // Pools screen: pool list with a play box, and the pool editor.
 import {
-  h, get, post, put, del, toast, run, highlight, thumb, bumpArt, searchList,
-  field, num, readNum, select, confirmDelete, focusIfDesktop, playerNames, areaSelect,
+  h, get, post, put, del, toast, run, highlight, thumb, bumpArt, searchList, artURL, poolEntry,
+  field, num, readNum, select, confirmDelete, focusIfDesktop, playerNames, areaSelect, splitName,
 } from './lib.js';
 
 // ALL is the built-in pool of every tag. The API lists stored pools only.
@@ -34,23 +34,16 @@ function summary(p) {
   ].filter(Boolean).join(' · ');
 }
 
-// cover is the art of the pool's first tag item with a URL, as the server
-// does for pool tags.
-function cover(p, byID) {
-  const it = p.items.find((i) => i.tag && byID.get(i.tag)?.url);
-  return it ? thumb(byID.get(it.tag)) : h('span', { class: 'thumb' });
-}
 
 async function list(view) {
   const [{ pools }, entries] = await Promise.all([get('api/pools'), get('api/tags')]);
-  const byID = new Map(entries.map((e) => [e.id, e]));
   const sl = searchList({
     items: pools,
     text: (p) => p.name,
     placeholder: 'Search pools (type anywhere)',
     empty: 'No pools yet. Use "New pool". "All tags" is built in.',
     row: (p, pos) => h('div', { class: 'row' },
-      cover(p, byID),
+      thumb(poolEntry(p)),
       h('div', { class: 'grow' },
         h('div', { class: 'title' }, highlight(p.name, pos)),
         h('div', { class: 'muted small', text: summary(p) }))),
@@ -128,7 +121,10 @@ function playBox(pools, entries) {
 }
 
 function blankPool(params) {
-  return { id: '', name: params?.get('name') || '', items: [], shuffle: null, repeat: null, volume: null, player: null };
+  return {
+    id: '', name: params?.get('name') || '', items: [], shuffle: null, repeat: null, volume: null, player: null,
+    label: { title: null, subtitle: null, artwork: null },
+  };
 }
 
 async function editor(view, id, params) {
@@ -149,6 +145,29 @@ async function editor(view, id, params) {
   const repeat = select([['', 'Item decides'], ['all', 'All'], ['one', 'One'], ['off', 'Off']], pool.repeat ?? '');
   const volume = num(pool.volume, { min: 0, max: 100, step: 1, placeholder: 'Item decides' });
   const player = select([['', 'Item decides'], ...playerNames(settings).map((p) => [p, p])], pool.player ?? '');
+  const label = pool.label ?? { title: null, subtitle: null, artwork: null };
+  const title = h('input', { value: label.title ?? '' });
+  const subtitle = h('input', { value: label.subtitle ?? '' });
+  const artwork = h('input', { value: label.artwork ?? '', placeholder: 'First item\'s art' });
+  const syncPlaceholders = () => {
+    const [t, s] = splitName(name.value);
+    title.placeholder = t || 'From name';
+    subtitle.placeholder = s || 'None';
+  };
+  name.addEventListener('input', syncPlaceholders);
+  syncPlaceholders();
+
+  // Art preview, as the label prints it.
+  const art = h('img', { class: 'art', alt: 'Artwork', width: 200, height: 200 });
+  art.addEventListener('error', () => art.classList.add('missing'));
+  const showArt = (refresh) => {
+    if (!id) return;
+    const pe = poolEntry(pool);
+    art.classList.remove('missing');
+    if (refresh) art.addEventListener('load', () => bumpArt(pe.id), { once: true });
+    art.src = artURL(pe, 400) + (refresh ? `&refresh=1&t=${Date.now()}` : '');
+  };
+  showArt(false);
 
   // Items. A tag item whose entry was deleted, or that now plays a pool,
   // stays in the list, marked: the server refuses to save the pool with it,
@@ -210,6 +229,7 @@ async function editor(view, id, params) {
     if (e.key === 'Enter') { e.preventDefault(); addMedia(); }
   });
 
+  const opt = (input) => (input.value.trim() === '' ? null : input.value.trim());
   const collect = () => ({
     id: pid.value.trim(),
     name: name.value,
@@ -218,6 +238,7 @@ async function editor(view, id, params) {
     repeat: repeat.value || null,
     volume: readNum(volume),
     player: player.value || null,
+    label: { title: opt(title), subtitle: opt(subtitle), artwork: opt(artwork) },
   });
   // Pool tags show the art of the pool's first item, which may have changed.
   const bumpPoolTags = (poolID) => {
@@ -231,6 +252,7 @@ async function editor(view, id, params) {
       const body = collect();
       const saved = id ? await put(`api/pools/${encodeURIComponent(id)}`, body) : await post('api/pools', body);
       bumpPoolTags(saved.id);
+      bumpArt(`pool:${saved.id}`);
       if (id && id !== saved.id) bumpPoolTags(id); // tags of the old id lost their art
       toast(`Saved ${saved.name}`);
       location.hash = `#/pools/edit/${encodeURIComponent(saved.id)}`;
@@ -253,8 +275,13 @@ async function editor(view, id, params) {
       usedBy.length > 0 && h('p', { class: 'muted small', text: `Used by ${plural(usedBy.length, 'tag')}: ${usedBy.map((e) => e.name).join(', ')}.` }),
       h('fieldset', {}, h('legend', { text: 'Items' }),
         h('p', { class: 'muted small', text: 'Each play picks one at random, never the same one twice in a row.' }),
-        itemList)),
+        itemList),
+      h('fieldset', {}, h('legend', { text: 'Label' }),
+        field('Title', title), field('Subtitle', subtitle),
+        field('Artwork', artwork, 'Image URL or a path under the config dir. Pool tags without art of their own use it too.'))),
     h('div', { class: 'stack' },
+      id && h('div', { class: 'art-box' }, art,
+        h('button', { type: 'button', text: 'Refresh art', onclick: () => showArt(true) })),
       h('fieldset', { class: 'picker' }, h('legend', { text: 'Add a tag' }), picker.el),
       h('fieldset', {}, h('legend', { text: 'Add media' }),
         h('div', { class: 'inline' }, media, h('button', { type: 'button', text: 'Add', onclick: addMedia })),

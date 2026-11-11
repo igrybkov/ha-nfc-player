@@ -1122,3 +1122,29 @@ func TestDefaultBackground(t *testing.T) {
 		t.Errorf("deleted default: background %q, want white", got)
 	}
 }
+
+func TestPoolArtworkAndLabel(t *testing.T) {
+	e := newEnv(t, false)
+	w := e.do(t, "POST", "/api/pools", map[string]any{
+		"name": "Kitchen", "items": []any{map[string]any{"media": "https://music.apple.com/us/album/x/1"}},
+		"label": map[string]any{"title": " Kitchen mix ", "subtitle": "", "artwork": nil},
+	})
+	wantStatus(t, w, http.StatusCreated)
+	p := decode[model.Pool](t, w)
+	if p.Label.Title == nil || *p.Label.Title != "Kitchen mix" || p.Label.Subtitle != nil {
+		t.Fatalf("label %+v", p.Label)
+	}
+
+	w = e.do(t, "GET", "/api/pools/kitchen/artwork?size=64", nil)
+	wantStatus(t, w, http.StatusOK)
+	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("content type %q", ct)
+	}
+	if last := e.art.calls[len(e.art.calls)-1]; last != "pool:kitchen" {
+		t.Fatalf("art asked for %q", last)
+	}
+	wantStatus(t, e.do(t, "GET", "/api/pools/all/artwork", nil), http.StatusOK)
+	wantJSONError(t, e.do(t, "GET", "/api/pools/nope/artwork", nil), http.StatusNotFound)
+	e.art.fail["pool:kitchen"] = true
+	wantJSONError(t, e.do(t, "GET", "/api/pools/kitchen/artwork", nil), http.StatusNotFound)
+}

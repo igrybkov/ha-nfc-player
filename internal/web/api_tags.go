@@ -15,6 +15,7 @@ import (
 	"golang.org/x/image/draw"
 
 	"github.com/igrybkov/ha-nfc-player/internal/model"
+	"github.com/igrybkov/ha-nfc-player/internal/pools"
 )
 
 func (s *Server) listTags(w http.ResponseWriter, _ *http.Request) {
@@ -111,6 +112,23 @@ func (s *Server) tagArtwork(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, r, err)
 		return
 	}
+	s.serveArtwork(w, r, e)
+}
+
+// poolArtwork serves a pool's label art, as tagArtwork does for an entry.
+func (s *Server) poolArtwork(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.deps.Pools.Pool(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "no pool "+r.PathValue("id"))
+		return
+	}
+	s.serveArtwork(w, r, pools.AsEntry(p))
+}
+
+// serveArtwork writes e's art as a JPEG: size (px) scales it down, and
+// refresh=1 looks it up again.
+func (s *Server) serveArtwork(w http.ResponseWriter, r *http.Request, e model.Entry) {
+	var err error
 	q := r.URL.Query()
 	refresh := q.Get("refresh") == "1"
 	size := 0

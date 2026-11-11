@@ -98,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/pools", s.createPool)
 	mux.HandleFunc("PUT /api/pools/{id}", s.updatePool)
 	mux.HandleFunc("DELETE /api/pools/{id}", s.deletePool)
+	mux.HandleFunc("GET /api/pools/{id}/artwork", s.poolArtwork)
 	mux.HandleFunc("POST /api/play", s.play)
 	mux.HandleFunc("POST /api/stop", s.stop)
 

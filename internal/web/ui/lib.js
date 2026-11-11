@@ -109,10 +109,23 @@ export function bumpArt(id) {
 // changes it. A pool entry's art comes from the pool's first item, so pool
 // saves bump it too (see pools.js).
 export function artURL(entry, size) {
-  const src = `${entry.url}|${entry.label?.artwork ?? ''}`;
+  const src = entry.artKey ?? `${entry.url}|${entry.label?.artwork ?? ''}`;
   const v = hash(entry.pool ? `${src}|${entry.pool}` : src);
   const bump = artBumps.get(entry.id);
-  return `api/tags/${encodeURIComponent(entry.id)}/artwork?size=${size}&v=${v}${bump ? `&r=${bump}` : ''}`;
+  const base = entry.artPath ?? `api/tags/${encodeURIComponent(entry.id)}/artwork`;
+  return `${base}?size=${size}&v=${v}${bump ? `&r=${bump}` : ''}`;
+}
+
+// poolEntry shows a pool where an entry is expected: in thumbnails, and in
+// the print picker. Its id is the print ref ("pool:<id>"); its art comes
+// from the pool's artwork route and changes with its override or items.
+export function poolEntry(p) {
+  return {
+    id: `pool:${p.id}`, name: p.name, url: '', pool: p.id, isPool: true,
+    label: p.label ?? { title: null, subtitle: null, artwork: null },
+    artPath: `api/pools/${encodeURIComponent(p.id)}/artwork`,
+    artKey: JSON.stringify([p.label?.artwork ?? '', p.items ?? []]),
+  };
 }
 
 function hash(s) {
