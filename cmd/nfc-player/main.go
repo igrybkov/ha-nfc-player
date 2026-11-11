@@ -26,6 +26,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	_ "github.com/igrybkov/ha-nfc-player/internal/labels/layouts" // registers "side" and "full"
+	"github.com/igrybkov/ha-nfc-player/internal/migrate"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 	"github.com/igrybkov/ha-nfc-player/internal/player"
 	"github.com/igrybkov/ha-nfc-player/internal/player/musicassistant"
@@ -110,15 +111,17 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 
 	// Storage. A missing file reads as its defaults and is created on the
 	// first save, so nothing is written to config_dir until the user saves.
-	tags := registry.New(store.Open(cfg.Path(config.TagsFile), registry.DefaultTagsFile))
-	poolStore := pools.New(store.Open(cfg.Path(config.PoolsFile), pools.DefaultFile), tags)
-	settings := config.NewSettingsStore(store.Open(cfg.Path(config.SettingsFile), model.DefaultSettings))
-	templates, err := config.NewTemplateStore(store.Open(cfg.Path(config.TemplatesFile), emptyList[labels.Template]))
+	// Files of an older schema are migrated in memory; see package migrate.
+	files := migrate.Open(cfg.ConfigDir, log)
+	tags := registry.New(store.In(files, config.TagsFile, registry.DefaultTagsFile))
+	poolStore := pools.New(store.In(files, config.PoolsFile, pools.DefaultFile), tags)
+	settings := config.NewSettingsStore(store.In(files, config.SettingsFile, model.DefaultSettings))
+	templates, err := config.NewTemplateStore(store.In(files, config.TemplatesFile, emptyList[labels.Template]))
 	if err != nil {
 		ln.Close()
 		return err
 	}
-	backgrounds, err := config.NewBackgroundStore(store.Open(cfg.Path(config.BackgroundsFile), emptyList[labels.Background]))
+	backgrounds, err := config.NewBackgroundStore(store.In(files, config.BackgroundsFile, emptyList[labels.Background]))
 	if err != nil {
 		ln.Close()
 		return err

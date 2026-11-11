@@ -1,0 +1,19 @@
+# Seed pools: the kitchen button hold of the old automations.
+# Copy to <config_dir>/pools.yaml (default /homeassistant/nfc_player/).
+version: 1
+pools:
+  - id: kitchen
+    name: Kitchen
+    items:
+      - tag: kenny-rogers-21-number-ones
+      - media: Cat Stevens — Teaser and the Firecat
+      - media: https://music.apple.com/us/playlist/ray-charles-essentials/pl.0a06c0dbe3a44ff2b4a40bd0d786c5c5
+      - media: 'Creedence Clearwater Revival — Chronicle: The 20 Greatest Hits'
+      - media: https://music.apple.com/us/playlist/the-beatles-essentials/pl.59619449a71f44dc99c4dabd6c442d41
+      - media: https://music.apple.com/us/playlist/elvis-presley-essentials/pl.5dbb70062bcd4b23b9430dd43f6fae5f
+      - media: https://music.apple.com/us/artist/the-dead-south/668262442
+      - media: https://music.apple.com/us/playlist/boombox/pl.2fb591e573134d70b5ffd12d1bd42e0b
+    shuffle: true
+    repeat: all
+    volume: 30
+    player: null

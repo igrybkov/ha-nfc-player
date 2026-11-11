@@ -38,10 +38,10 @@ func TestLoadMissingFileDoesNotWrite(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("version: 3\nnames: [seed]\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("version: 1\nnames: [seed]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := f.Load(); err != nil || v.Version != 3 || len(v.Names) != 1 {
+	if v, err := f.Load(); err != nil || v.Version != 1 || len(v.Names) != 1 {
 		t.Fatalf("after the seed: %+v, %v", v, err)
 	}
 	// And a file removed again gives the default, not the stale content.
@@ -75,14 +75,15 @@ func TestUpdateCreatesMissingFile(t *testing.T) {
 func TestSaveThenLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "doc.yaml")
 	f := Open(path, defDoc)
-	if err := f.Save(doc{Version: 2, Names: []string{"a", "Володимир"}}); err != nil {
+	// Save writes the set's version, whatever the value says.
+	if err := f.Save(doc{Version: 7, Names: []string{"a", "Володимир"}}); err != nil {
 		t.Fatal(err)
 	}
 	v, err := Open(path, defDoc).Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Version != 2 || len(v.Names) != 2 || v.Names[1] != "Володимир" {
+	if v.Version != 1 || len(v.Names) != 2 || v.Names[1] != "Володимир" {
 		t.Fatalf("got %+v", v)
 	}
 	// No temp files left behind.
