@@ -11,10 +11,15 @@ export async function render(view, rest, params) {
   return list(view);
 }
 
+// kindOf names what a URL plays, for the tags list. Spotify and Music
+// Assistant say "track"; the list says "song" for both services.
 function kindOf(url) {
   const m = /music\.apple\.com\/[a-z]{2}\/(album|playlist|song|artist|station)\//.exec(url)
-    || /^apple_music:\/\/(\w+)\//.exec(url);
-  return m ? m[1] : 'link';
+    || /open\.spotify\.com\/(?:intl-[\w-]+\/)?(album|playlist|track|artist)\//.exec(url)
+    || /^(?:apple_music|spotify)(?:--\w+)?:\/\/(\w+)\//.exec(url)
+    || /^spotify:(\w+):/.exec(url);
+  if (!m) return 'link';
+  return m[1] === 'track' ? 'song' : m[1];
 }
 
 // getPools lists stored pools. A failure only costs pool names, so the
@@ -69,9 +74,9 @@ async function editor(view, id, params) {
 
   const name = h('input', { value: entry.name, required: true, placeholder: 'Artist — Album' });
   // type=text: the browser's URL check rejects apple_music:// (underscore in
-  // the scheme). The server validates the link.
+  // the scheme) and spotify:album:… URIs. The server validates the link.
   const url = h('input', { value: entry.url, type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false',
-    required: true, placeholder: 'https://music.apple.com/…' });
+    required: true, placeholder: 'https://music.apple.com/… or https://open.spotify.com/…' });
   // A tag plays a URL or a pool. A pool picks shuffle and repeat itself.
   const source = select([['url', 'Music URL'], ['pool', 'Pool']], entry.pool ? 'pool' : 'url', { 'aria-label': 'Plays' });
   const poolOpts = [[ALL.id, ALL.name], ...pools.map((p) => [p.id, p.name])];
@@ -81,7 +86,7 @@ async function editor(view, id, params) {
   const repeat = select([['all', 'All'], ['one', 'One'], ['off', 'Off']], entry.repeat);
   const volume = num(entry.volume, { min: 0, max: 100, step: 1, placeholder: 'Room default' });
   const player = select([['', 'Default chain'], ...playerNames(settings).map((p) => [p, p])], entry.player ?? '');
-  const urlField = field('Music URL', url, 'Apple Music link or apple_music:// URI.');
+  const urlField = field('Music URL', url, 'Apple Music or Spotify link, or an apple_music:// or spotify: URI.');
   const poolField = field('Pool', pool, 'Plays a random item of the pool. Edit pools on the Pools tab.');
   const shuffleField = h('label', { class: 'check' }, shuffle, ' Shuffle');
   const repeatField = field('Repeat', repeat);

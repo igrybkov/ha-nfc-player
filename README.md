@@ -12,6 +12,8 @@ runs on `amd64` and `aarch64`.
   the tag reader.
 - Native Sonos playback from Apple Music links. Music Assistant is the
   fallback.
+- Spotify links too: Sonos plays albums, playlists and tracks; Music
+  Assistant plays artists.
 - Per-room volume and per-tag shuffle, repeat and volume.
 - Pools: a tag, button or dashboard tile plays a random album from a list.
 - Play and stop from any automation with the `nfc_player_play` and

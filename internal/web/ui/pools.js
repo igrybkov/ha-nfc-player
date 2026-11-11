@@ -258,7 +258,7 @@ async function editor(view, id) {
       h('fieldset', { class: 'picker' }, h('legend', { text: 'Add a tag' }), picker.el),
       h('fieldset', {}, h('legend', { text: 'Add media' }),
         h('div', { class: 'inline' }, media, h('button', { type: 'button', text: 'Add', onclick: addMedia })),
-        h('p', { class: 'muted small', text: 'A music URL, "Artist — Album", or a name Music Assistant searches for.' })))),
+        h('p', { class: 'muted small', text: 'An Apple Music or Spotify URL, "Artist — Album", or a name Music Assistant searches for.' })))),
   h('div', { class: 'actions' },
     save,
     id && h('button', { type: 'button', class: 'danger', text: 'Delete', onclick: (ev) => {

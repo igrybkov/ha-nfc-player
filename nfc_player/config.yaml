@@ -1,6 +1,6 @@
 name: NFC Player
 slug: nfc_player
-version: "0.2.2"
+version: "0.3.0"
 description: Play music from NFC tags and print labels for them
 url: https://github.com/igrybkov/ha-nfc-player
 arch:

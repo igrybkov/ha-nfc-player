@@ -345,14 +345,18 @@ for tests, plus `hatest.Server`: an in-process websocket server backed by a
 
 ```go
 type Kind string // album, playlist, song, artist, station, unknown
+type Service string // apple_music, spotify (v0.3, section 14)
 type Media struct {
     URL     string
+    Service Service // "" reads as apple_music
     Kind    Kind
     ID      string
     Country string
 }
-func Parse(raw string) (Media, error)         // share links and apple_music:// URIs
+func Parse(raw string) (Media, error)         // share links and provider URIs, section 14
 func (m Media) ShareURL() string
+func (m Media) URI() string                   // MA URI, always the domain form
+func (m Media) IsSpotify() bool
 type Apple interface {
     ArtistSongs(ctx context.Context, artistID string, limit int) ([]Song, error)
 }
@@ -403,12 +407,13 @@ Adding a player means one new package that implements `Player` and one line in
 
 Sonos player: entity from `rooms` (area override, else model preference).
 Supports album, playlist, song, artist (artist via iTunes song queue).
+Spotify: album, playlist and song only (section 14).
 Sequence as in section 1.
 
 Music Assistant player: MA `media_player` entity in the same area (area
 override, else the entity of the `music_assistant` integration in that area).
 Supports all kinds, plus `Query`. Uses `music_assistant.play_media` with
-`media_id` (share URL or `apple_music://` URI), `media_type`, `enqueue:
+`media_id` (share URL, or `apple_music://` / `spotify://` URI, section 14), `media_type`, `enqueue:
 replace`, then `shuffle_set`/`repeat_set`/`volume_set` on the MA entity.
 `Query` uses `music_assistant.search` with `return_response`.
 
@@ -878,3 +883,50 @@ var ErrNotFound, ErrDuplicate, ErrInvalid error // wrapped like registry's
 
 - Phase lead (not agents): model, this section, version bump, CHANGELOG,
   release, and the HA-side migration.
+
+## 14. v0.3: Spotify
+
+Goal: a tag, pool item or play event can use a Spotify link, next to Apple
+Music. Verified live on the user's system before the work started.
+
+### catalog
+
+- `Media.Service`: `apple_music` or `spotify`. The zero value reads as
+  Apple Music, so hand-built Media keeps working.
+- Parse accepts, for Spotify: `open.spotify.com/[intl-xx/]<kind>/<id>`
+  (query ignored), `spotify:<kind>:<id>`, `spotify://<kind>/<id>`. Kinds:
+  album, playlist, track (KindSong), artist. Other kinds (show, episode,
+  user) are ErrUnsupported. Ids must be `[A-Za-z0-9]{22}`. Country is "".
+- Parse also accepts the Music Assistant instance suffix,
+  `<provider>--<instance>://`, for both providers. URI() always returns
+  the domain form (`spotify://album/<id>`), which MA plays.
+- ShareURL for Spotify is always rebuilt as
+  `https://open.spotify.com/<album|playlist|track|artist>/<id>`, so `?si=`
+  and `/intl-xx/` never reach Sonos.
+
+### Players
+
+- Sonos supports Spotify album, playlist and song. A Spotify artist link
+  fails on Sonos with UPnP error 714, so Supports is false and the router
+  moves on to MA. The iTunes artist queue and stations stay Apple-only.
+- MA supports all four Spotify kinds with `spotify://` URIs.
+- MA search: hits with the instance suffix used to be skipped (bug, fixed).
+  Ranking: Apple Music before Spotify; within a service, albums before
+  playlists. `library://` and http links are skipped.
+
+### Artwork
+
+- A Spotify entry URL skips the iTunes lookup and og:image steps. It asks
+  `https://open.spotify.com/oembed?url=<share url>` (no key) and swaps the
+  size marker at the start of the image id for the 640px one
+  (`ab67616d00001e02` → `ab67616d0000b273`, `ab67616100005174` →
+  `ab6761610000e5eb`). Ids that are not one 40-hex image id (mosaics) keep
+  their size. The iTunes name search stays the last step.
+- The chain allowlist adds `open.spotify.com`, `*.spotifycdn.com`,
+  `i.scdn.co` and `mosaic.scdn.co`. The dial-time IP guard is unchanged.
+
+### Validation and UI
+
+- `pools.IsURL` treats `spotify:<kind>:`, `spotify://` and the suffixed
+  provider forms as URLs. Free text such as "Spotify Hits" stays a name.
+- Registry errors and UI hints name Spotify links next to Apple Music.

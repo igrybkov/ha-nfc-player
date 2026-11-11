@@ -167,7 +167,10 @@ func TestValidate(t *testing.T) {
 		"bad URL": func(p *model.Pool) {
 			p.Items = append(p.Items, model.PoolItem{Media: "https://open.spotify.com/album/1"})
 		},
-		"bad URI":          func(p *model.Pool) { p.Items = append(p.Items, model.PoolItem{Media: "apple_music://album/x"}) },
+		"bad URI": func(p *model.Pool) { p.Items = append(p.Items, model.PoolItem{Media: "apple_music://album/x"}) },
+		"bad Spotify URI": func(p *model.Pool) {
+			p.Items = append(p.Items, model.PoolItem{Media: "spotify:episode:5gzLOflH95LkKYE6XSXE9k"})
+		},
 		"volume over 100":  func(p *model.Pool) { p.Volume = ptr(101) },
 		"negative volume":  func(p *model.Pool) { p.Volume = ptr(-1) },
 		"bad repeat":       func(p *model.Pool) { p.Repeat = ptr(model.Repeat("sometimes")) },
@@ -185,13 +188,37 @@ func TestValidate(t *testing.T) {
 	}
 
 	// Trimmed input, null settings, a blank player and name-only media are fine.
-	p := model.Pool{Name: "  Mixed ", Player: ptr(" "), Items: []model.PoolItem{{Tag: " kenny "}, {Media: "Volodymyr Ivasiuk"}}}
+	p := model.Pool{Name: "  Mixed ", Player: ptr(" "), Items: []model.PoolItem{{Tag: " kenny "}, {Media: "Volodymyr Ivasiuk"},
+		{Media: "https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k"}, {Media: "Spotify Hits"}}}
 	got, err := s.Create(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Name != "Mixed" || got.Player != nil || got.Items[0].Tag != "kenny" {
 		t.Errorf("normalized = %+v", got)
+	}
+}
+
+func TestIsURL(t *testing.T) {
+	for media, want := range map[string]bool{
+		"https://music.apple.com/us/album/x/1":                  true,
+		"http://example.com":                                    true,
+		"apple_music://album/1":                                 true,
+		"Apple_Music--P6Nxuakq://playlist/pl.x":                 true,
+		"https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k": true,
+		"spotify://album/x":                                     true,
+		"spotify--RiSye5Z5://album/x":                           true,
+		" spotify:album:5gzLOflH95LkKYE6XSXE9k":                 true,
+		"spotify:album:short":                                   true, // a URI that won't parse
+		"Spotify Hits":                                          false,
+		"spotify: top hits":                                     false,
+		"Spotify — Top Hits":                                    false,
+		"Cat Stevens — Teaser and the Firecat":                  false,
+		"apple music":                                           false,
+	} {
+		if got := IsURL(media); got != want {
+			t.Errorf("IsURL(%q) = %v, want %v", media, got, want)
+		}
 	}
 }
 

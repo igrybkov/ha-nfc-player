@@ -36,10 +36,11 @@ type fakeApple struct {
 	pages  map[string]string // path → og:image content
 	gate   chan struct{}     // when set, /search waits for it to close
 	status int               // when set, /search and /lookup answer with it
+	oembed map[string]string // Spotify share URL → thumbnail_url; missing = 404
 }
 
 func newFakeApple(t *testing.T) *fakeApple {
-	f := &fakeApple{t: t, hits: map[string]int{}, lookup: map[string]string{}, pages: map[string]string{}}
+	f := &fakeApple{t: t, hits: map[string]int{}, lookup: map[string]string{}, pages: map[string]string{}, oembed: map[string]string{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -62,6 +63,13 @@ func (f *fakeApple) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(f.status)
 	case r.URL.Path == "/redirect":
 		http.Redirect(w, r, r.URL.Query().Get("to"), http.StatusFound)
+	case r.URL.Path == "/oembed":
+		thumb, ok := f.oembed[r.URL.Query().Get("url")]
+		if !ok {
+			http.NotFound(w, r) // what Spotify answers for an unknown id
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"type": "rich", "thumbnail_url": thumb, "thumbnail_width": 300})
 	case r.URL.Path == "/lookup":
 		results(f.lookup[r.URL.Query().Get("id")])
 	case r.URL.Path == "/search":
@@ -110,6 +118,7 @@ func pngBytes(t *testing.T, w, h int) []byte {
 func (f *fakeApple) cache(t *testing.T) *Cache {
 	return &Cache{
 		Dir: t.TempDir(), ConfigDir: t.TempDir(), HTTP: f.srv.Client(), ITunesURL: f.srv.URL,
+		OEmbedURL:    f.srv.URL + "/oembed",
 		AllowHost:    func(host string) bool { return host == "127.0.0.1" },
 		allowPrivate: true,
 	}
@@ -164,6 +173,76 @@ func TestResolveURLChain(t *testing.T) {
 	f.search = ""
 	if _, err := c.ResolveURL(context.Background(), model.Entry{Name: "Nothing"}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("nothing found: err = %v, want ErrNotFound", err)
+	}
+}
+
+// Spotify art comes from oEmbed for the clean share link, upscaled to 640px.
+// The Apple steps never run for it: the album regex would read "5" out of
+// the id below.
+func TestSpotifyArtwork(t *testing.T) {
+	f := newFakeApple(t)
+	base := f.srv.URL
+	f.oembed["https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k"] = base + "/img/image/ab67616d00001e02e4e8c3b6c6a0e3d2b1a09f8e"
+	f.oembed["https://open.spotify.com/artist/0OdUWJ0sBjDrqHygGUXeCF"] = base + "/img/image/ab67616100005174c0ffee0123456789abcdef01"
+	f.search = base + "/img/search/100x100bb.jpg"
+	c := f.cache(t)
+
+	cases := []struct {
+		name, url, want string
+	}{
+		{"album link with intl and si", "https://open.spotify.com/intl-de/album/5gzLOflH95LkKYE6XSXE9k?si=abc",
+			base + "/img/image/ab67616d0000b273e4e8c3b6c6a0e3d2b1a09f8e"},
+		{"suffixed MA uri", "spotify--RiSye5Z5://album/5gzLOflH95LkKYE6XSXE9k",
+			base + "/img/image/ab67616d0000b273e4e8c3b6c6a0e3d2b1a09f8e"},
+		{"artist", "spotify:artist:0OdUWJ0sBjDrqHygGUXeCF",
+			base + "/img/image/ab6761610000e5ebc0ffee0123456789abcdef01"},
+		{"oembed 404 falls to search", "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+			base + "/img/search/1200x1200bb.jpg"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := c.ResolveURL(context.Background(), model.Entry{Name: "Spotify — " + tc.name, URL: tc.url})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("ResolveURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if n := f.count("/lookup"); n != 0 {
+		t.Errorf("iTunes lookup ran %d times for Spotify entries", n)
+	}
+
+	// The whole path: resolve, download, crop.
+	img, err := c.Artwork(context.Background(), model.Entry{Name: "Album", URL: cases[0].url}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := img.Bounds(); b.Dx() != b.Dy() {
+		t.Errorf("art is %v, want a square", b)
+	}
+	if n := f.count("/img/image/ab67616d0000b273e4e8c3b6c6a0e3d2b1a09f8e"); n != 1 {
+		t.Errorf("640px image downloads = %d, want 1", n)
+	}
+}
+
+func TestSpotifyFullSize(t *testing.T) {
+	const hash = "0123456789abcdef01234567"
+	mosaic := "https://mosaic.scdn.co/300/" + strings.Repeat("ab67616d00001e02"+hash, 4)
+	for in, want := range map[string]string{
+		"https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02" + hash: "https://image-cdn-ak.spotifycdn.com/image/ab67616d0000b273" + hash,
+		"https://image-cdn-fa.spotifycdn.com/image/ab67616100005174" + hash: "https://image-cdn-fa.spotifycdn.com/image/ab6761610000e5eb" + hash,
+		"https://i.scdn.co/image/ab67616d00001e02" + hash:                   "https://i.scdn.co/image/ab67616d0000b273" + hash,
+		// Other markers stay, and so does a mosaic of four ids.
+		"https://i.scdn.co/image/ab67706c0000da84" + hash: "https://i.scdn.co/image/ab67706c0000da84" + hash,
+		mosaic: mosaic,
+		"https://i.scdn.co/image/xab67616d00001e02" + hash[1:]: "https://i.scdn.co/image/xab67616d00001e02" + hash[1:],
+		"": "",
+	} {
+		if got := spotifyFullSize(in); got != want {
+			t.Errorf("spotifyFullSize(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -432,6 +511,11 @@ func TestChainHostAllowlist(t *testing.T) {
 	for host, want := range map[string]bool{
 		"music.apple.com": true, "itunes.apple.com": true, "is1-ssl.mzstatic.com": true,
 		"mzstatic.com": false, "evilmzstatic.com": false, "apple.com": false, "127.0.0.1": false,
+
+		"open.spotify.com": true, "image-cdn-ak.spotifycdn.com": true, "image-cdn-fa.spotifycdn.com": true,
+		"i.scdn.co": true, "mosaic.scdn.co": true,
+		"spotify.com": false, "api.spotify.com": false, "open.spotify.com.evil.test": false,
+		"spotifycdn.com": false, "evilspotifycdn.com": false, "scdn.co": false, "x.scdn.co": false,
 	} {
 		if got := DefaultAllowHost(host); got != want {
 			t.Errorf("DefaultAllowHost(%q) = %v, want %v", host, got, want)

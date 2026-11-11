@@ -38,6 +38,8 @@ func TestParse(t *testing.T) {
 		{"uri playlist", "apple_music://playlist/pl.e55da0d4a18140e3b1120339e2608aa5", KindPlaylist, "pl.e55da0d4a18140e3b1120339e2608aa5", "us"},
 		{"uri track", "apple_music://track/1646032520", KindSong, "1646032520", "us"},
 		{"uri artist", "apple_music://artist/1797008889", KindArtist, "1797008889", "us"},
+		// Music Assistant search returns provider URIs with an instance suffix.
+		{"suffixed apple uri", "apple_music--P6Nxuakq://playlist/pl.e55da0d4a18140e3b1120339e2608aa5", KindPlaylist, "pl.e55da0d4a18140e3b1120339e2608aa5", "us"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,12 +47,47 @@ func TestParse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
-			if m.Kind != tt.kind || m.ID != tt.id || m.Country != tt.country {
-				t.Errorf("got kind=%s id=%s country=%s, want kind=%s id=%s country=%s", m.Kind, m.ID, m.Country, tt.kind, tt.id, tt.country)
+			if m.Kind != tt.kind || m.ID != tt.id || m.Country != tt.country || m.Service != ServiceAppleMusic {
+				t.Errorf("got kind=%s id=%s country=%s service=%s, want kind=%s id=%s country=%s service=apple_music",
+					m.Kind, m.ID, m.Country, m.Service, tt.kind, tt.id, tt.country)
 			}
 		})
 	}
 }
+
+func TestParseSpotify(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		kind Kind
+		id   string
+	}{
+		{"spotify album", "https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k", KindAlbum, spAlbum},
+		{"spotify playlist si", "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=1a2b3c4d5e6f", KindPlaylist, "37i9dQZF1DXcBWIGoYBM5M"},
+		{"spotify track intl", "https://open.spotify.com/intl-de/track/4uLU6hMCjMI75M1A2tKUQC?si=x", KindSong, "4uLU6hMCjMI75M1A2tKUQC"},
+		{"spotify artist", "https://open.spotify.com/artist/0OdUWJ0sBjDrqHygGUXeCF", KindArtist, "0OdUWJ0sBjDrqHygGUXeCF"},
+		{"spotify link trailing slash", "https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k/", KindAlbum, spAlbum},
+		{"spotify colon uri", "spotify:album:5gzLOflH95LkKYE6XSXE9k", KindAlbum, spAlbum},
+		{"spotify colon track", "spotify:track:4uLU6hMCjMI75M1A2tKUQC", KindSong, "4uLU6hMCjMI75M1A2tKUQC"},
+		{"spotify ma uri", "spotify://artist/0OdUWJ0sBjDrqHygGUXeCF", KindArtist, "0OdUWJ0sBjDrqHygGUXeCF"},
+		{"spotify ma track", "spotify://track/4uLU6hMCjMI75M1A2tKUQC", KindSong, "4uLU6hMCjMI75M1A2tKUQC"},
+		{"suffixed spotify uri", "spotify--RiSye5Z5://album/5gzLOflH95LkKYE6XSXE9k", KindAlbum, spAlbum},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := Parse(tt.raw)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if m.Kind != tt.kind || m.ID != tt.id || m.Service != ServiceSpotify || m.Country != "" {
+				t.Errorf("got %+v, want kind=%s id=%s service=spotify, no country", m, tt.kind, tt.id)
+			}
+		})
+	}
+}
+
+// spAlbum is a real Spotify album id from a Music Assistant search result.
+const spAlbum = "5gzLOflH95LkKYE6XSXE9k"
 
 func TestParseErrors(t *testing.T) {
 	for _, raw := range []string{
@@ -68,13 +105,38 @@ func TestParseErrors(t *testing.T) {
 		"library://album/12",
 		"apple_music://radio/ra.1&sn=9", // goes into a Sonos URI
 		"apple_music://radio/ra.",
+		"apple_music--://album/1",
+		"apple_music--P6Nxuakq://album/abc",
+
+		"https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9",    // 21 chars
+		"https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9kX",  // 23 chars
+		"https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE-k",   // not base62
+		"https://open.spotify.com/album",                          // no id
+		"https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k/x", // extra segment
+		"https://open.spotify.com/intl-de/",
+		"spotify:album:short",
+		"spotify:album:5gzLOflH95LkKYE6XSXE9k:x",
+		"spotify://album/5gzLOflH95LkKYE6XSXE9k/x",
+		"spotify://song/4uLU6hMCjMI75M1A2tKUQC", // MA and Spotify call it track
+		"spotify--RiSye5Z5://album/bad",
+		"spotify://radio/5gzLOflH95LkKYE6XSXE9k",
 	} {
 		if m, err := Parse(raw); err == nil {
 			t.Errorf("Parse(%q) = %+v, want error", raw, m)
 		}
 	}
-	if _, err := Parse("https://example.com/x/y"); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("non-Apple host: err = %v, want ErrUnsupported", err)
+	for _, raw := range []string{
+		"https://example.com/x/y",
+		"https://open.spotify.com/show/5gzLOflH95LkKYE6XSXE9k",
+		"https://open.spotify.com/episode/5gzLOflH95LkKYE6XSXE9k?si=x",
+		"https://open.spotify.com/user/spotify",
+		"spotify:show:5gzLOflH95LkKYE6XSXE9k",
+		"spotify://episode/5gzLOflH95LkKYE6XSXE9k",
+		"spotify--RiSye5Z5://show/5gzLOflH95LkKYE6XSXE9k",
+	} {
+		if _, err := Parse(raw); !errors.Is(err, ErrUnsupported) {
+			t.Errorf("Parse(%q): err = %v, want ErrUnsupported", raw, err)
+		}
 	}
 }
 
@@ -90,6 +152,12 @@ func TestShareURL(t *testing.T) {
 		{"apple_music://playlist/pl.e55da0d4a18140e3b1120339e2608aa5", "https://music.apple.com/us/playlist/playlist-pl.e55da0d4a18140e3b1120339e2608aa5/pl.e55da0d4a18140e3b1120339e2608aa5"},
 		{"apple_music://artist/1797008889", "https://music.apple.com/us/artist/artist-1797008889/1797008889"},
 		{"apple_music://track/42", "https://music.apple.com/us/song/track/42"},
+		{"apple_music--P6Nxuakq://album/1646032515", "https://music.apple.com/us/album/album-1646032515/1646032515"},
+		// Spotify links are rebuilt, so ?si= and /intl-xx/ never reach Sonos.
+		{"https://open.spotify.com/intl-de/album/5gzLOflH95LkKYE6XSXE9k?si=abc", "https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k"},
+		{"spotify:playlist:37i9dQZF1DXcBWIGoYBM5M", "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"},
+		{"spotify://track/4uLU6hMCjMI75M1A2tKUQC", "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"},
+		{"spotify--RiSye5Z5://artist/0OdUWJ0sBjDrqHygGUXeCF", "https://open.spotify.com/artist/0OdUWJ0sBjDrqHygGUXeCF"},
 	}
 	for _, tt := range tests {
 		m, err := Parse(tt.raw)
@@ -98,6 +166,25 @@ func TestShareURL(t *testing.T) {
 		}
 		if got := m.ShareURL(); got != tt.want {
 			t.Errorf("ShareURL(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+// Suffixed provider URIs come back in the domain form.
+func TestURINormalizesInstanceSuffix(t *testing.T) {
+	for raw, want := range map[string]string{
+		"apple_music--P6Nxuakq://playlist/pl.xxx":      "apple_music://playlist/pl.xxx",
+		"spotify--RiSye5Z5://album/" + spAlbum:         "spotify://album/" + spAlbum,
+		"https://open.spotify.com/track/" + spAlbum:    "spotify://track/" + spAlbum,
+		"spotify:artist:" + spAlbum:                    "spotify://artist/" + spAlbum,
+		"https://music.apple.com/us/album/x/123?i=456": "apple_music://track/456",
+	} {
+		m, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", raw, err)
+		}
+		if got := m.URI(); got != want {
+			t.Errorf("URI(%q) = %q, want %q", raw, got, want)
 		}
 	}
 }
@@ -113,6 +200,12 @@ func TestURI(t *testing.T) {
 		{Media{Kind: KindArtist, ID: "3"}, "apple_music://artist/3"},
 		{Media{Kind: KindStation, ID: "ra.4"}, "apple_music://radio/ra.4"},
 		{Media{Kind: KindUnknown, ID: "5"}, ""},
+		{Media{Service: ServiceAppleMusic, Kind: KindAlbum, ID: "1"}, "apple_music://album/1"},
+		{Media{Service: ServiceSpotify, Kind: KindAlbum, ID: spAlbum}, "spotify://album/" + spAlbum},
+		{Media{Service: ServiceSpotify, Kind: KindPlaylist, ID: "p"}, "spotify://playlist/p"},
+		{Media{Service: ServiceSpotify, Kind: KindSong, ID: "t"}, "spotify://track/t"},
+		{Media{Service: ServiceSpotify, Kind: KindArtist, ID: "a"}, "spotify://artist/a"},
+		{Media{Service: ServiceSpotify, Kind: KindStation, ID: "s"}, ""},
 	}
 	for _, tt := range tests {
 		if got := tt.m.URI(); got != tt.want {

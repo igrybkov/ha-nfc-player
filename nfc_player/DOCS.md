@@ -16,7 +16,8 @@ them.
    pool. The name is matched the same way, so `Kitchen | fridge card` plays
    the Kitchen pool, and `All tags` plays a random tag.
 4. A name like `Artist — Album` with no entry is searched in Music Assistant,
-   and the first Apple Music album or playlist plays.
+   and the first album or playlist plays. Apple Music hits come before
+   Spotify hits.
 5. It finds the speaker in the reader's area and plays the music there.
    Sonos speakers play natively. Music Assistant is the fallback.
    Apple Music stations (`music.apple.com/.../station/...`) play on Sonos
@@ -28,7 +29,7 @@ them.
 1. Install the app and start it.
 2. Open **NFC Player** in the sidebar.
 3. Add a tag: **Tags → New tag**. Use the tag's name as Home Assistant
-   knows it and paste an Apple Music link. You can also link tag IDs from
+   knows it and paste an Apple Music or Spotify link. You can also link tag IDs from
    the list of tags Home Assistant knows.
 4. Open **Settings** in the app to set area volumes, players and readers.
 
@@ -37,6 +38,19 @@ Coming from the old "Play Music when NFC tag is scanned" automation? Copy
 `config_dir`. They hold the old Music Map and room volumes. You can copy them
 before or after the first start: the app writes nothing to `config_dir` until
 you save something, and it picks up a new file on its next read.
+
+## Spotify
+
+A tag, pool item or play event can use a Spotify link:
+`https://open.spotify.com/album/...`, `/playlist/...`, `/track/...` or
+`/artist/...`. A share link with `?si=...` or `/intl-xx/` works as is.
+`spotify:album:...` and `spotify://album/...` URIs work too.
+
+- Sonos plays Spotify albums, playlists and tracks natively.
+- Sonos can't play a Spotify artist link, so artists go to Music Assistant.
+- Link Spotify in the Sonos app for the native path. Add the Spotify
+  provider in Music Assistant for artists and as the fallback.
+- Cover art comes from Spotify.
 
 ## Options
 
@@ -299,7 +313,7 @@ you print. Those labels print without art. Open the tag to set an artwork
 URL or file, or press **Refresh art** to look it up again.
 
 Art lookups only go to Apple (Apple Music pages, the iTunes API and its
-image servers). An artwork URL you set yourself may point at any public
+image servers) and Spotify (its oEmbed API and image servers). An artwork URL you set yourself may point at any public
 site, but never at an address on your local network.
 
 If your printer shifts the page, set the offset in mm and press **Save

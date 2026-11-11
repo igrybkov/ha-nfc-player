@@ -1,4 +1,5 @@
-// Package sonos plays Apple Music share links on native Sonos media players.
+// Package sonos plays Apple Music and Spotify share links on native Sonos
+// media players.
 //
 // Owner: track A (docs/PLAN.md section 10).
 package sonos
@@ -36,9 +37,17 @@ func (p *Player) Name() string { return "sonos" }
 
 // Supports album, playlist, song, artist and station media in an area with
 // a Sonos entity. It can't search, so a Query is left to the router, and it has no
-// radio mode.
+// radio mode. Spotify is album, playlist and song only: Sonos refuses a
+// Spotify artist link (UPnP error 714), so that goes to Music Assistant.
 func (p *Player) Supports(req player.Request) bool {
 	if req.Query != nil || req.Radio || req.Area.SonosEntity == "" {
+		return false
+	}
+	if req.Media.IsSpotify() {
+		switch req.Media.Kind {
+		case catalog.KindAlbum, catalog.KindPlaylist, catalog.KindSong:
+			return true
+		}
 		return false
 	}
 	switch req.Media.Kind {

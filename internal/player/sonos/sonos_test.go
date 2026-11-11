@@ -52,6 +52,35 @@ func TestPlayAlbumSequence(t *testing.T) {
 	}
 }
 
+// A Spotify album runs the same sequence with the clean share link: no ?si=
+// and no /intl-xx/ prefix.
+func TestPlaySpotifyAlbumSequence(t *testing.T) {
+	f := &hatest.Fake{}
+	p := New(f, &catalog.ITunes{})
+	req := player.Request{Media: mustParse(t, "https://open.spotify.com/intl-de/album/5gzLOflH95LkKYE6XSXE9k?si=abc"),
+		Area: familyRoom, Volume: 15, Shuffle: false, Repeat: "all"}
+	if !p.Supports(req) {
+		t.Fatal("Spotify album not supported")
+	}
+	if err := p.Play(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	want := []hatest.ServiceCall{
+		{Domain: "media_player", Service: "media_stop", Target: target()},
+		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.15}, Target: target()},
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target()},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": false}, Target: target()},
+		{Domain: "media_player", Service: "play_media", Target: target(), Data: map[string]any{
+			"media_content_id": "https://open.spotify.com/album/5gzLOflH95LkKYE6XSXE9k", "media_content_type": "music",
+		}},
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target()},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": false}, Target: target()},
+	}
+	if !reflect.DeepEqual(f.Calls, want) {
+		t.Errorf("calls:\n got %+v\nwant %+v", f.Calls, want)
+	}
+}
+
 func TestPlayAppleMusicURIUsesShareLink(t *testing.T) {
 	f := &hatest.Fake{}
 	p := New(f, nil)
@@ -169,12 +198,25 @@ func TestSupports(t *testing.T) {
 		{"query", p, player.Request{Query: &player.Query{}, Area: familyRoom}, false},
 		{"no entity", p, player.Request{Media: catalog.Media{Kind: catalog.KindAlbum}, Area: rooms.Area{ID: "x"}}, false},
 		{"radio", p, player.Request{Media: catalog.Media{Kind: catalog.KindAlbum}, Area: familyRoom, Radio: true}, false},
+
+		// p has an iTunes client, so a false for the artist is the Spotify rule.
+		{"spotify album", p, player.Request{Media: spotify(catalog.KindAlbum), Area: familyRoom}, true},
+		{"spotify playlist", p, player.Request{Media: spotify(catalog.KindPlaylist), Area: familyRoom}, true},
+		{"spotify song", p, player.Request{Media: spotify(catalog.KindSong), Area: familyRoom}, true},
+		{"spotify artist", p, player.Request{Media: spotify(catalog.KindArtist), Area: familyRoom}, false}, // UPnP error 714
+		{"spotify station", p, player.Request{Media: spotify(catalog.KindStation), Area: familyRoom}, false},
+		{"spotify no entity", p, player.Request{Media: spotify(catalog.KindAlbum), Area: rooms.Area{ID: "x"}}, false},
+		{"spotify radio", p, player.Request{Media: spotify(catalog.KindAlbum), Area: familyRoom, Radio: true}, false},
 	}
 	for _, tt := range tests {
 		if got := tt.p.Supports(tt.req); got != tt.want {
 			t.Errorf("%s: Supports = %v, want %v", tt.name, got, tt.want)
 		}
 	}
+}
+
+func spotify(k catalog.Kind) catalog.Media {
+	return catalog.Media{Service: catalog.ServiceSpotify, Kind: k, ID: "5gzLOflH95LkKYE6XSXE9k"}
 }
 
 func TestPlayStation(t *testing.T) {

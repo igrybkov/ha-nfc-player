@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -233,11 +234,16 @@ func validateItem(it model.PoolItem, entries []model.Entry) error {
 	return nil
 }
 
-// IsURL reports whether media text is meant as a URL: http(s):// or
-// apple_music://. Such text must catalog.Parse; any other text is a name.
+// uriPrefix matches the start of a provider URI: apple_music:// and
+// spotify://, both also with a Music Assistant instance suffix
+// (spotify--RiSye5Z5://), and spotify:<kind>: ("spotify: hits" is a name).
+var uriPrefix = regexp.MustCompile(`^(?:(?:apple_music|spotify)(?:--[a-z0-9]+)?://|spotify:[a-z]+:)`)
+
+// IsURL reports whether media text is meant as a URL: http(s):// or a
+// provider URI. Such text must catalog.Parse; any other text is a name.
 func IsURL(media string) bool {
 	m := strings.ToLower(strings.TrimSpace(media))
-	return strings.HasPrefix(m, "http://") || strings.HasPrefix(m, "https://") || strings.HasPrefix(m, "apple_music://")
+	return strings.HasPrefix(m, "http://") || strings.HasPrefix(m, "https://") || uriPrefix.MatchString(m)
 }
 
 // applyDefaults fills values missing from hand-written files.

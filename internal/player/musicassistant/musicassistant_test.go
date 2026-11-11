@@ -119,6 +119,46 @@ func TestSearch(t *testing.T) {
 			t.Errorf("ShareURL = %s", m.ShareURL())
 		}
 	})
+	// Real MA results carry an instance suffix on the provider; it used to
+	// make every hit look unplayable.
+	t.Run("suffixed apple playlist", func(t *testing.T) {
+		f := &hatest.Fake{EntityList: entities(), Respond: respond(`{"albums":[{"uri":"library://album/1"}],"playlists":[{"uri":"apple_music--P6Nxuakq://playlist/pl.e55d"}]}`)}
+		m, err := New(f, defaults()).Search(context.Background(), office, q)
+		if err != nil || m.Kind != catalog.KindPlaylist || m.ID != "pl.e55d" {
+			t.Fatalf("Search = %+v, %v", m, err)
+		}
+		if m.URI() != "apple_music://playlist/pl.e55d" {
+			t.Errorf("URI = %s, want the domain form", m.URI())
+		}
+	})
+	t.Run("ranking", func(t *testing.T) {
+		tests := []struct {
+			name, body, want string
+		}{
+			{"apple playlist beats spotify album",
+				`{"albums":[{"uri":"spotify--RiSye5Z5://album/5gzLOflH95LkKYE6XSXE9k"}],"playlists":[{"uri":"apple_music--P6Nxuakq://playlist/pl.e55d"}]}`,
+				"apple_music://playlist/pl.e55d"},
+			{"apple album beats apple playlist",
+				`{"albums":[{"uri":"spotify://album/5gzLOflH95LkKYE6XSXE9k"},{"uri":"apple_music://album/123"}],"playlists":[{"uri":"apple_music://playlist/pl.x"}]}`,
+				"apple_music://album/123"},
+			{"spotify when no apple hit",
+				`{"albums":[{"uri":"library://album/1"}],"playlists":[{"uri":"spotify--RiSye5Z5://playlist/37i9dQZF1DXcBWIGoYBM5M"}]}`,
+				"spotify://playlist/37i9dQZF1DXcBWIGoYBM5M"},
+			{"spotify album beats spotify playlist",
+				`{"albums":[{"uri":"spotify--RiSye5Z5://album/5gzLOflH95LkKYE6XSXE9k"}],"playlists":[{"uri":"spotify://playlist/37i9dQZF1DXcBWIGoYBM5M"}]}`,
+				"spotify://album/5gzLOflH95LkKYE6XSXE9k"},
+			{"share links skipped",
+				`{"albums":[{"uri":"https://music.apple.com/us/album/x/1"}],"playlists":[{"uri":"spotify://playlist/37i9dQZF1DXcBWIGoYBM5M"}]}`,
+				"spotify://playlist/37i9dQZF1DXcBWIGoYBM5M"},
+		}
+		for _, tt := range tests {
+			f := &hatest.Fake{EntityList: entities(), Respond: respond(tt.body)}
+			m, err := New(f, defaults()).Search(context.Background(), office, q)
+			if err != nil || m.URI() != tt.want {
+				t.Errorf("%s: Search = %s, %v; want %s", tt.name, m.URI(), err, tt.want)
+			}
+		}
+	})
 	t.Run("name only", func(t *testing.T) {
 		f := &hatest.Fake{EntityList: entities(), Respond: respond(searchResult)}
 		if _, err := New(f, defaults()).Search(context.Background(), office, player.Query{Album: "Divisive"}); err != nil {
@@ -189,12 +229,20 @@ func TestSupports(t *testing.T) {
 		{"empty media", player.Request{Area: office}, false},
 		{"no MA entity", player.Request{Query: &player.Query{}, Area: noMA}, false},
 		{"radio", player.Request{Media: catalog.Media{Kind: catalog.KindAlbum, ID: "1"}, Area: office, Radio: true}, true},
+		{"spotify album", player.Request{Media: spotifyMedia(catalog.KindAlbum), Area: office}, true},
+		{"spotify playlist", player.Request{Media: spotifyMedia(catalog.KindPlaylist), Area: office}, true},
+		{"spotify song", player.Request{Media: spotifyMedia(catalog.KindSong), Area: office}, true},
+		{"spotify artist", player.Request{Media: spotifyMedia(catalog.KindArtist), Area: office}, true},
 	}
 	for _, tt := range tests {
 		if got := p.Supports(tt.req); got != tt.want {
 			t.Errorf("%s: Supports = %v, want %v", tt.name, got, tt.want)
 		}
 	}
+}
+
+func spotifyMedia(k catalog.Kind) catalog.Media {
+	return catalog.Media{Service: catalog.ServiceSpotify, Kind: k, ID: "0OdUWJ0sBjDrqHygGUXeCF"}
 }
 
 func TestPlayRadioMode(t *testing.T) {
@@ -218,6 +266,32 @@ func TestRouterRadioSkipsSonos(t *testing.T) {
 	name, err := r.Play(context.Background(), player.Request{Media: m, Area: office, Volume: 15, Radio: true}, "")
 	if err != nil || name != "music_assistant" {
 		t.Fatalf("Play = %q, %v", name, err)
+	}
+	for _, c := range f.Calls {
+		if c.Target.EntityID[0] != "media_player.office_ma" {
+			t.Errorf("call on %v, want only the MA entity", c.Target.EntityID)
+		}
+	}
+}
+
+// Sonos can't play a Spotify artist (UPnP error 714), so the router skips
+// it and MA plays the spotify:// URI. Sonos has an iTunes client here, so
+// the skip is the Spotify rule, not a missing artist lookup.
+func TestRouterSpotifyArtistGoesToMA(t *testing.T) {
+	f := &hatest.Fake{}
+	ma := New(f, defaults())
+	r := player.NewRouter(defaults(), ma, sonos.New(f, &catalog.ITunes{}), ma)
+	m, err := catalog.Parse("https://open.spotify.com/artist/0OdUWJ0sBjDrqHygGUXeCF?si=x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := r.Play(context.Background(), player.Request{Media: m, Area: office, Volume: 15, Shuffle: true}, "")
+	if err != nil || name != "music_assistant" {
+		t.Fatalf("Play = %q, %v", name, err)
+	}
+	want := map[string]any{"media_id": "spotify://artist/0OdUWJ0sBjDrqHygGUXeCF", "media_type": "artist", "enqueue": "replace"}
+	if got := f.Calls[1].Data; !reflect.DeepEqual(got, want) {
+		t.Errorf("play_media data = %v, want %v", got, want)
 	}
 	for _, c := range f.Calls {
 		if c.Target.EntityID[0] != "media_player.office_ma" {

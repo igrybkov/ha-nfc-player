@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/igrybkov/ha-nfc-player/internal/model"
@@ -53,14 +54,19 @@ func TestValidate(t *testing.T) {
 		func(e *model.Entry) { e.Volume = ptr(-1) },
 		func(e *model.Entry) { e.Player = ptr(" ") },
 		func(e *model.Entry) { e.TagIDs = []string{""} },
-		func(e *model.Entry) { e.URL = "https://example.com/us/album/x/1" },      // not Apple
-		func(e *model.Entry) { e.URL = "spotify:album:1" },                       // unsupported scheme
-		func(e *model.Entry) { e.URL = "apple_music://album/not-a-number" },      // parses, bad id
-		func(e *model.Entry) { e.URL = "https://music.apple.com/us/playlist/x" }, // no id
-		func(e *model.Entry) { e.Pool = "kitchen" },                              // url and pool
-		func(e *model.Entry) { e.URL, e.Pool = "", "Kitchen" },                   // not a slug
+		func(e *model.Entry) { e.URL = "https://example.com/us/album/x/1" },                     // not Apple
+		func(e *model.Entry) { e.URL = "spotify:album:1" },                                      // bad Spotify id
+		func(e *model.Entry) { e.URL = "https://open.spotify.com/show/5gzLOflH95LkKYE6XSXE9k" }, // podcast
+		func(e *model.Entry) { e.URL = "apple_music://album/not-a-number" },                     // parses, bad id
+		func(e *model.Entry) { e.URL = "https://music.apple.com/us/playlist/x" },                // no id
+		func(e *model.Entry) { e.Pool = "kitchen" },                                             // url and pool
+		func(e *model.Entry) { e.URL, e.Pool = "", "Kitchen" },                                  // not a slug
 		func(e *model.Entry) { e.URL, e.Pool = "", "kitchen mix" },
 		func(e *model.Entry) { e.URL, e.Pool = "", "-kitchen" },
+	}
+	if err := Validate(model.Entry{Name: "A", URL: "https://example.com/x", Repeat: model.RepeatAll}); err == nil ||
+		!strings.Contains(err.Error(), "open.spotify.com") {
+		t.Errorf("unsupported url error = %v, want it to name Spotify links", err)
 	}
 	for i, mod := range bad {
 		e := ok
@@ -74,6 +80,9 @@ func TestValidate(t *testing.T) {
 		"https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5",
 		"apple_music://playlist/pl.abc",
 		"apple_music://artist/123",
+		"https://open.spotify.com/intl-de/album/5gzLOflH95LkKYE6XSXE9k?si=abc",
+		"https://open.spotify.com/artist/0OdUWJ0sBjDrqHygGUXeCF",
+		"spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
 	} {
 		e := ok
 		e.URL = u

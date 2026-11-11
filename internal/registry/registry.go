@@ -211,7 +211,7 @@ func validateSource(e model.Entry) error {
 	}
 	if _, err := catalog.Parse(e.URL); err != nil {
 		if errors.Is(err, catalog.ErrUnsupported) {
-			return fmt.Errorf("%w: url must be a music.apple.com link or an apple_music://<kind>/<id> URI, not %q", ErrInvalid, e.URL)
+			return fmt.Errorf("%w: url must be a music.apple.com or open.spotify.com link, or an apple_music:// or spotify: URI, not %q", ErrInvalid, e.URL)
 		}
 		return fmt.Errorf("%w: url: %v", ErrInvalid, err)
 	}

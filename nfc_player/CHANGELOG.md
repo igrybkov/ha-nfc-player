@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Spotify: tags, pools and play events take Spotify links
+  (`open.spotify.com/...`, also with `?si=` or `/intl-xx/`) and
+  `spotify:` URIs. Sonos plays albums, playlists and tracks. Music
+  Assistant plays artists, since Sonos refuses a Spotify artist link.
+  Cover art comes from Spotify.
+- The `Artist — Album` search found nothing when Music Assistant returned
+  provider URIs with an instance suffix (`apple_music--P6Nxuakq://...`).
+  Those hits now play. Apple Music hits rank before Spotify hits.
+
 ## 0.2.2
 
 - A scanned tag with no entry plays the pool its name matches (name or id,

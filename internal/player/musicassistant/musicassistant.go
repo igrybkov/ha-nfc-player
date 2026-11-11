@@ -40,8 +40,8 @@ func New(c ha.Client, s model.SettingsSource) *Player { return &Player{ha: c, se
 
 func (p *Player) Name() string { return "music_assistant" }
 
-// Supports every Apple Music kind but stations, and Query, in an area with
-// an MA entity. MA's Apple Music provider can't play stations (it raises
+// Supports every Apple Music and Spotify kind but stations, and Query, in an
+// area with an MA entity. MA's Apple Music provider can't play stations (it raises
 // NotImplementedError), so a station is left to Sonos.
 func (p *Player) Supports(req player.Request) bool {
 	if req.Area.MAEntity == "" || req.Media.Kind == catalog.KindStation {
@@ -117,9 +117,15 @@ type searchResponse struct {
 	Playlists []searchItem `json:"playlists"`
 }
 
-// Search runs music_assistant.search and returns the first apple_music:// hit.
-// A Query without Artist searches by name only. Albums come before playlists. Library items (library://) are skipped: Sonos
-// can't play them.
+// searchServices is the order Search ranks providers in: Apple Music first,
+// the service the app started with, then Spotify.
+var searchServices = []catalog.Service{catalog.ServiceAppleMusic, catalog.ServiceSpotify}
+
+// Search runs music_assistant.search and returns the best provider hit:
+// Apple Music before Spotify, and within a service albums before playlists.
+// A Query without Artist searches by name only. Provider URIs may carry an
+// instance suffix (apple_music--P6Nxuakq://...); the Media's URI() drops it.
+// Library items (library://) are skipped: Sonos can't play them.
 func (p *Player) Search(ctx context.Context, area rooms.Area, q player.Query) (catalog.Media, error) {
 	entryID, err := p.configEntry(ctx, area)
 	if err != nil {
@@ -142,15 +148,33 @@ func (p *Player) Search(ctx context.Context, area rooms.Area, q player.Query) (c
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return catalog.Media{}, fmt.Errorf("music assistant: search response: %w", err)
 	}
-	for _, it := range append(res.Albums, res.Playlists...) {
-		if !strings.HasPrefix(it.URI, "apple_music://") {
+	if m, ok := bestHit(append(res.Albums, res.Playlists...)); ok {
+		return m, nil
+	}
+	return catalog.Media{}, fmt.Errorf("music assistant: %q — %q: %w", q.Artist, q.Album, player.ErrNotFound)
+}
+
+// bestHit returns the first item of the highest ranked service in
+// searchServices. Items are in album-then-playlist order. Only provider URIs
+// count; an http link or library:// item is skipped.
+func bestHit(items []searchItem) (catalog.Media, bool) {
+	var parsed []catalog.Media
+	for _, it := range items {
+		if strings.HasPrefix(it.URI, "http://") || strings.HasPrefix(it.URI, "https://") {
 			continue
 		}
 		if m, err := catalog.Parse(it.URI); err == nil {
-			return m, nil
+			parsed = append(parsed, m)
 		}
 	}
-	return catalog.Media{}, fmt.Errorf("music assistant: %q — %q: %w", q.Artist, q.Album, player.ErrNotFound)
+	for _, service := range searchServices {
+		for _, m := range parsed {
+			if m.Service == service {
+				return m, true
+			}
+		}
+	}
+	return catalog.Media{}, false
 }
 
 // configEntry returns the MA config entry id: from settings, else the entry

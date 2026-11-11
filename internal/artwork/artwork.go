@@ -6,11 +6,15 @@
 //  1. The entry's label.artwork override: an http(s) URL, or a file path
 //     under ConfigDir. It is never written to the index.
 //  2. The art URL found on an earlier run, from artwork.json.
-//  3. For an entry URL: the iTunes lookup for an album id (artworkUrl100 with
-//     the size swapped to 1200x1200), then the page's og:image with the last
-//     path segment swapped to 1200x1200bb.jpg. Both run for any URL, since
-//     albums get pulled from Apple Music and the lookup then finds nothing.
-//  4. iTunes album search by name.
+//  3. For a Spotify entry URL: the Spotify oEmbed thumbnail, with the size
+//     marker in the image id swapped for the 640px one. The Apple steps
+//     below are skipped for it.
+//  4. For any other entry URL: the iTunes lookup for an album id
+//     (artworkUrl100 with the size swapped to 1200x1200), then the page's
+//     og:image with the last path segment swapped to 1200x1200bb.jpg. Both
+//     run for any URL, since albums get pulled from Apple Music and the lookup
+//     then finds nothing.
+//  5. iTunes album search by name.
 //
 // Each step that fails is logged and the next one runs. A key whose chain
 // ran cleanly and found nothing is remembered in memory for NegativeTTL. If a
@@ -21,8 +25,8 @@
 //
 // # Network guard
 //
-// The chain (pages, iTunes, the art it finds, index URLs) only fetches from
-// hosts AllowHost accepts, checked before each request and on each redirect.
+// The chain (pages, iTunes, Spotify oEmbed, the art it finds, index URLs)
+// only fetches from hosts AllowHost accepts, checked before each request and on each redirect.
 // A label.artwork URL may point at any host, but every connection, chain or
 // override, is refused when the resolved IP is loopback, private, link-local,
 // CGNAT, unspecified or multicast. The check runs on the dialed IP, so DNS
@@ -59,6 +63,7 @@ import (
 
 	_ "golang.org/x/image/webp" // override files are sometimes webp
 
+	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 )
 
@@ -75,6 +80,7 @@ var ErrTooLarge = errors.New("artwork: image too large")
 // Defaults for the zero-value fields of Cache.
 const (
 	DefaultITunesURL = "https://itunes.apple.com"
+	DefaultOEmbedURL = "https://open.spotify.com/oembed"
 	DefaultUserAgent = "Mozilla/5.0 ha-nfc-player"
 	defaultTimeout   = 20 * time.Second
 
@@ -104,6 +110,7 @@ type Cache struct {
 	ConfigDir string // base for relative label.artwork paths
 	HTTP      *http.Client
 	ITunesURL string // default DefaultITunesURL; tests point it at httptest
+	OEmbedURL string // Spotify oEmbed endpoint; default DefaultOEmbedURL
 	UserAgent string // default DefaultUserAgent; Apple pages want a browser-like one
 	Logger    *slog.Logger
 	// AllowHost reports whether the lookup chain may fetch from host (lower
@@ -154,8 +161,8 @@ func (c *Cache) Artwork(ctx context.Context, e model.Entry, refresh bool) (image
 	return cropSquare(img), nil
 }
 
-// ResolveURL finds the art URL for e (override, iTunes lookup, og:image,
-// search). It does not use or update the index. A path override is returned
+// ResolveURL finds the art URL for e (override, Spotify oEmbed or iTunes
+// lookup and og:image, search). It does not use or update the index. A path override is returned
 // as given. It returns ErrNotFound only when every step ran cleanly; if a
 // step hit a transient error and no later step found art, that error is
 // returned instead.
@@ -164,7 +171,11 @@ func (c *Cache) ResolveURL(ctx context.Context, e model.Entry) (string, error) {
 		return override, nil
 	}
 	var steps []func() (string, error)
-	if e.URL != "" {
+	if m, err := catalog.Parse(e.URL); err == nil && m.IsSpotify() {
+		// Not the Apple steps: the album regex would read the leading digits
+		// of a base62 id, and og:image is not Apple's image URL scheme.
+		steps = append(steps, func() (string, error) { return c.spotifyArtwork(ctx, m) })
+	} else if e.URL != "" {
 		steps = append(steps,
 			func() (string, error) { return c.albumArtwork(ctx, e.URL) },
 			func() (string, error) { return c.pageArtwork(ctx, e.URL) })
@@ -368,6 +379,47 @@ func (c *Cache) pageArtwork(ctx context.Context, pageURL string) (string, error)
 		return "", nil
 	}
 	return lastSegment.ReplaceAllString(html.UnescapeString(string(m[1])), "/1200x1200bb.jpg"), nil
+}
+
+// spotifySizes maps the size marker that starts a Spotify image id in an
+// oEmbed thumbnail to the 640px one. Other markers stay as they are.
+var spotifySizes = map[string]string{
+	"ab67616d00001e02": "ab67616d0000b273", // album and track, 300 → 640
+	"ab67616100005174": "ab6761610000e5eb", // artist, 320 → 640
+}
+
+// spotifyArtwork asks Spotify oEmbed for the thumbnail of the media's
+// canonical share link. It needs no key and works for every Spotify kind.
+func (c *Cache) spotifyArtwork(ctx context.Context, m catalog.Media) (string, error) {
+	share := m.ShareURL()
+	var data struct {
+		ThumbnailURL string `json:"thumbnail_url"`
+	}
+	if err := c.getJSON(ctx, c.oembedURL()+"?url="+url.QueryEscape(share), &data); err != nil {
+		return "", fmt.Errorf("spotify oembed %s: %w", share, err)
+	}
+	return spotifyFullSize(data.ThumbnailURL), nil
+}
+
+// spotifyImageID is one Spotify image id: a 16-hex size marker and 24 hex.
+// A mosaic (a playlist cover made of four ids) does not match, so it keeps
+// its size.
+var spotifyImageID = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// spotifyFullSize swaps the size marker at the start of the image id (the
+// last path segment) for the 640px one.
+func spotifyFullSize(thumb string) string {
+	i := strings.LastIndexByte(thumb, '/')
+	if i < 0 || !spotifyImageID.MatchString(thumb[i+1:]) {
+		return thumb
+	}
+	dir, id := thumb[:i+1], thumb[i+1:]
+	for small, large := range spotifySizes {
+		if rest, ok := strings.CutPrefix(id, small); ok {
+			return dir + large + rest
+		}
+	}
+	return thumb
 }
 
 // searchArtwork finds the first album for the name in the iTunes search.
@@ -642,10 +694,16 @@ func (c *Cache) getJSON(ctx context.Context, u string, v any) error {
 	return json.Unmarshal(data, v)
 }
 
-// DefaultAllowHost accepts the Apple hosts the chain needs: Apple Music
-// pages, the iTunes API and the mzstatic image CDN.
+// DefaultAllowHost accepts the hosts the chain needs: Apple Music pages, the
+// iTunes API and the mzstatic image CDN; Spotify oEmbed (open.spotify.com)
+// and the Spotify image CDNs (*.spotifycdn.com, i.scdn.co, mosaic.scdn.co).
 func DefaultAllowHost(host string) bool {
-	return host == "music.apple.com" || host == "geo.music.apple.com" || host == "itunes.apple.com" || strings.HasSuffix(host, ".mzstatic.com")
+	switch host {
+	case "music.apple.com", "geo.music.apple.com", "itunes.apple.com",
+		"open.spotify.com", "i.scdn.co", "mosaic.scdn.co":
+		return true
+	}
+	return strings.HasSuffix(host, ".mzstatic.com") || strings.HasSuffix(host, ".spotifycdn.com")
 }
 
 func (c *Cache) checkHost(u *url.URL) error {
@@ -744,6 +802,13 @@ func (c *Cache) itunesURL() string {
 		return strings.TrimRight(c.ITunesURL, "/")
 	}
 	return DefaultITunesURL
+}
+
+func (c *Cache) oembedURL() string {
+	if c.OEmbedURL != "" {
+		return c.OEmbedURL
+	}
+	return DefaultOEmbedURL
 }
 
 func (c *Cache) userAgent() string {
