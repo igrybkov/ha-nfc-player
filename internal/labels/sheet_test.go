@@ -16,7 +16,7 @@ import (
 var avery5260 = Template{
 	ID: "avery-5260", Page: Size{8.5, 11}, Label: Size{2.625, 1},
 	Grid: Grid{Cols: 3, Rows: 10}, Margin: Margin{0.1875, 0.5}, Gap: Gap{0.125, 0},
-	Layout: "side", Font: FontSizes{11, 8.5},
+	Format: "large", Font: FontSizes{11, 8.5},
 }
 
 func items(names ...string) []Item {
@@ -204,9 +204,9 @@ func TestItemFromSubjectOverrides(t *testing.T) {
 	}
 }
 
-func TestBackgroundColors(t *testing.T) {
+func TestThemeColors(t *testing.T) {
 	fade, fadeText := "#112233", "#445566"
-	b := Background{ID: "x", Background: "#FFFFFF", Text: "#000000"}
+	b := Theme{ID: "x", Background: "#FFFFFF", Text: "#000000"}
 	// Unset fade colors keep the script's look on any background.
 	if b.FadeColor() != (color.RGBA{0, 0, 0, 255}) {
 		t.Errorf("fade without Fade = %v, want black", b.FadeColor())
@@ -221,10 +221,10 @@ func TestBackgroundColors(t *testing.T) {
 	if b.FadeTextColor() != (color.RGBA{0x44, 0x55, 0x66, 255}) {
 		t.Errorf("fade text = %v", b.FadeTextColor())
 	}
-	if (Background{Background: "#000000"}).IsWhite() {
+	if (Theme{Background: "#000000"}).IsWhite() {
 		t.Error("black is white")
 	}
-	if !(Background{Background: "#FFFFFF"}).IsWhite() {
+	if !(Theme{Background: "#FFFFFF"}).IsWhite() {
 		t.Error("white is not white")
 	}
 	for _, bad := range []string{"", "#FFF", "FFFFFF", "#GGGGGG", "#+12345", "#1234567"} {

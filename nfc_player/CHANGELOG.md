@@ -1,7 +1,24 @@
 # Changelog
 
-## 0.4.3
+## 0.5.0
 
+- Backgrounds are now **themes**. A theme sets the colors, and for each
+  label format (small label, large label, dot) where the art goes: left,
+  right, on top, at the bottom, behind the text, or none. It can print
+  the art in gray. The fade settings show only where art sits behind the
+  text.
+- The theme editor previews the theme on every template you have, with no
+  art and with three made-up covers. The server draws the previews with
+  the print code, so they show what prints. Type your own title and
+  subtitle to try them.
+- Templates have a format in place of a layout. **Dot** templates print
+  round labels: the art and fill are cut to a circle and the text stays
+  inside it. With art beside the text it sits next to the art; otherwise
+  it is centered.
+- Files move to version 5: `backgrounds.yaml` becomes `themes.yaml`, a
+  template's `layout: full` becomes `format: small` and `side` becomes
+  `large`, and the default background becomes the default theme. Labels
+  print as before.
 - Reorder a record's items by dragging them by their handle (⠿). It works
   with a mouse and on touch screens. With the handle focused, the up and
   down arrow keys move the item too. The ↑ and ↓ buttons are gone.

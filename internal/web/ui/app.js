@@ -4,11 +4,11 @@ import * as records from './records.js';
 import * as tags from './tags.js';
 import * as print from './print.js';
 import * as templates from './templates.js';
-import * as backgrounds from './backgrounds.js';
+import * as themes from './themes.js';
 import * as settings from './settings.js';
 import { h } from './lib.js';
 
-const screens = { records, tags, print, templates, backgrounds, settings };
+const screens = { records, tags, print, templates, themes, settings };
 let cleanup = null;
 let seq = 0;
 

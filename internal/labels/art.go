@@ -11,8 +11,16 @@ import (
 // ArtDPI is the resolution art is resampled to before it goes into the PDF.
 const ArtDPI = 600
 
-// ArtPixels converts a length in points to pixels at ArtDPI.
-func ArtPixels(pt float64) int { return max(1, int(math.Round(pt/PointsPerInch*ArtDPI))) }
+// artPixels converts a length in points to pixels at dpi.
+func artPixels(pt, dpi float64) int { return max(1, int(math.Round(pt/PointsPerInch*dpi))) }
+
+// Grayscale turns img gray in place (Rec. 601 luma, as most printers do).
+func Grayscale(img *image.RGBA) {
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		y := uint8((299*uint32(img.Pix[i]) + 587*uint32(img.Pix[i+1]) + 114*uint32(img.Pix[i+2]) + 500) / 1000)
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2] = y, y, y
+	}
+}
 
 // CropToRatio center-crops img to width/height = ratio (script: crop_to).
 func CropToRatio(img image.Image, ratio float64) image.Image {
@@ -45,7 +53,7 @@ func ResizeArt(img image.Image, w, h int) *image.RGBA {
 	return out
 }
 
-// fadeMaxAlpha and fadeGamma shape the full layout gradient (script: 190, 0.8).
+// fadeMaxAlpha and fadeGamma shape the background art gradient (script: 190, 0.8).
 const (
 	fadeMaxAlpha = 190
 	fadeGamma    = 0.8

@@ -1,0 +1,12 @@
+version: 5
+themes:
+  - id: navy
+    name: Navy
+    background: "#000080"
+    text: "#FFFFFF"
+    fade: "#000000"
+    fade_text: "#FFFFFF"
+    formats:
+      small: {art: background}
+      large: {art: right, mono: true}
+      dot: {art: top}

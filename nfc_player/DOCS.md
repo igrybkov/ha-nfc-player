@@ -67,7 +67,7 @@ The app keeps your data as plain YAML under `config_dir`:
 - `records.yaml`: what each tag name plays.
 - `settings.yaml`: rooms, volumes, players, print offsets.
 - `templates.yaml`: your own label templates.
-- `backgrounds.yaml`: your own label backgrounds.
+- `themes.yaml`: your own label themes.
 
 A file that does not exist reads as the defaults. The app creates it the
 first time you save on that screen, so an untouched `config_dir` stays empty
@@ -88,6 +88,10 @@ history keeps the old files.
   records" items.
 - Version 4 (app 0.4.2) added item names. Nothing converts; an app of
   version 3 can't write these files, so it can't drop the names.
+- Version 5 (app 0.5.0) turned backgrounds into themes: `backgrounds.yaml`
+  becomes `themes.yaml`, and `print.default_background` in settings
+  becomes `print.default_theme`. A template's `layout` becomes its
+  `format`: `full` is `small`, `side` is `large`. Labels print as before.
 
 While a file does not parse, or comes from a newer app version, the app
 keeps using what it read last and refuses to save, so it never overwrites
@@ -109,8 +113,8 @@ Content-Security-Policy and can only be framed by Home Assistant itself.
   Assistant. **All recent scans** below shows every scan, event and UI play
   with its result and error.
 - **Print**: make a label PDF (see below).
-- **Templates** and **Backgrounds**: the built-ins are read-only. Duplicate
-  one to make your own. **Make default** on a background makes the Print
+- **Templates** and **Themes**: the built-ins are read-only. Duplicate
+  one to make your own. **Make default** on a theme makes the Print
   screen start with it (white until you pick one).
 - **Settings**: default volume (1 to 100), per-area volume (0 to 100), Sonos
   and Music Assistant entity per area, player order and fallback, reader
@@ -340,7 +344,7 @@ tap_action:
 
 ## Labels
 
-On **Print**, pick records, copies, a template and a background. A label
+On **Print**, pick records, copies, a template and a theme. A label
 shows the record's name, so a tag written with that name plays it. Click a
 slot on the sheet to start there; used slots stay empty. **Generate PDF**
 opens the PDF; print it at 100% (no scaling).
@@ -359,6 +363,29 @@ an artwork URL or file, or press **Refresh art** to look it up again.
 Art lookups only go to Apple (Apple Music pages, the iTunes API and its
 image servers) and Spotify (its oEmbed API and image servers). An artwork URL you set yourself may point at any public
 site, but never at an address on your local network.
+
+### Templates and themes
+
+A template is the paper: page size, label size, grid, font sizes and a
+format. The format is **small label**, **large label** or **dot** (a round
+label). A theme is the look, for every format at once:
+
+- Background and text colors.
+- For each format, where the art goes: left, right, on top, at the
+  bottom, behind the text, or no art. **Gray art** prints the cover in
+  gray.
+- Where the art sits behind the text, the fade under the text and the
+  text on it.
+
+A print uses the theme's style for the template's format. Out of the box,
+large labels put the art left, and small labels and dots put it behind the
+text.
+
+The theme editor previews the theme on each of your templates, with no art
+and with three made-up covers (pale, dark and busy). The previews come
+from the same code as the PDF, so lines wrap the same way. Type a title
+and subtitle to try your own text. A format with no template yet shows at
+a common size.
 
 If your printer shifts the page, set the offset in mm and press **Save
 offsets**. It is saved per template. Positive X moves the print right,

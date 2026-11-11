@@ -5,5 +5,5 @@ configuration:
   config_dir:
     name: Config folder
     description: >-
-      Where tags, settings, templates and backgrounds are stored. Keep it under
+      Where tags, settings, templates and themes are stored. Keep it under
       /homeassistant so the files are in your config backups and git.

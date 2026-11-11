@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"log/slog"
 	"net/http"
@@ -166,18 +167,6 @@ func (f *fakeTags) DeleteTag(_ context.Context, id string) error {
 	return &ha.Error{Code: "not_found", Message: "Unable to find tag_id"}
 }
 
-type fakeLayout struct{}
-
-func (fakeLayout) ID() string   { return "web-test" }
-func (fakeLayout) Name() string { return "Web test" }
-func (fakeLayout) Draw(labels.Canvas, labels.Rect, labels.Item, labels.Background, labels.Template) error {
-	return nil
-}
-
-// The real Template.Validate checks the layout registry; register a test
-// layout once so user templates in these tests validate.
-var registerLayout sync.Once
-
 type fakeLabels struct {
 	mu   sync.Mutex
 	jobs []labels.Job
@@ -216,7 +205,10 @@ func (f *fakeLabels) SheetMap(t labels.Template, job labels.Job) [][]labels.Slot
 	return pages
 }
 
-func (f *fakeLabels) Layouts() []labels.Layout { return []labels.Layout{fakeLayout{}} }
+// RenderPreview renders for real: it is cheap and needs no PDF.
+func (f *fakeLabels) RenderPreview(w io.Writer, p labels.Preview) error {
+	return labels.RenderPreview(w, p)
+}
 
 func (f *fakeLabels) ValidateTemplate(t labels.Template) error {
 	if t.ID == "" {
@@ -254,13 +246,12 @@ type testEnv struct {
 
 func newEnv(t *testing.T, supervisor bool) *testEnv {
 	t.Helper()
-	registerLayout.Do(func() { labels.RegisterLayout(fakeLayout{}) })
 	dir := t.TempDir()
 	tpls, err := config.NewTemplateStore(store.Open(filepath.Join(dir, config.TemplatesFileName), config.DefaultTemplatesFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	bgs, err := config.NewBackgroundStore(store.Open(filepath.Join(dir, config.BackgroundsFileName), config.DefaultBackgroundsFile))
+	bgs, err := config.NewThemeStore(store.Open(filepath.Join(dir, config.ThemesFileName), config.DefaultThemesFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +266,7 @@ func newEnv(t *testing.T, supervisor bool) *testEnv {
 		picker:   &fakePicker{},
 	}
 	e.h = New(Deps{
-		Records: e.recs, Settings: e.settings, Templates: tpls, Backgrounds: bgs,
+		Records: e.recs, Settings: e.settings, Templates: tpls, Themes: bgs,
 		Play: e.play, Scans: e.scans, Artwork: e.art, HATags: e.tags, Labels: e.lbl, ArtPicker: e.picker, Titles: e.picker,
 		Supervisor: supervisor,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -772,7 +763,7 @@ func userTemplate() labels.Template {
 		Label:  labels.Size{WidthIn: 2, HeightIn: 1},
 		Grid:   labels.Grid{Cols: 3, Rows: 8},
 		Margin: labels.Margin{LeftIn: 0.5, TopIn: 0.5},
-		Layout: "web-test",
+		Format: labels.FormatLarge,
 		Font:   labels.FontSizes{TitlePt: 10, SubtitlePt: 8},
 	}
 }
@@ -805,31 +796,60 @@ func TestTemplates(t *testing.T) {
 	wantJSONError(t, e.do(t, "DELETE", "/api/templates/my-sheet", nil), http.StatusNotFound)
 }
 
-func TestBackgrounds(t *testing.T) {
+func TestThemes(t *testing.T) {
 	e := newEnv(t, false)
-	w := e.do(t, "GET", "/api/backgrounds", nil)
+	w := e.do(t, "GET", "/api/themes", nil)
 	wantStatus(t, w, http.StatusOK)
-	if list := decode[[]labels.Background](t, w); len(list) != 2 {
-		t.Fatalf("list %+v", list)
+	if list := decode[[]labels.Theme](t, w); len(list) != 2 {
+		t.Fatalf("built-ins: %+v", list)
 	}
-	w = e.do(t, "POST", "/api/backgrounds", map[string]any{"name": "Navy", "background": "#000080", "text": "#FFFFFF", "fade": nil, "fade_text": "#FFEE00"})
+	w = e.do(t, "POST", "/api/themes", map[string]any{"name": "Navy", "background": "#000080", "text": "#FFFFFF", "fade": nil, "fade_text": "#FFEE00",
+		"formats": map[string]any{"dot": map[string]any{"art": "top", "mono": true}}})
 	wantStatus(t, w, http.StatusCreated)
-	b := decode[labels.Background](t, w)
-	if b.ID != "navy" || b.Fade != nil || b.FadeText == nil || *b.FadeText != "#FFEE00" {
+	b := decode[labels.Theme](t, w)
+	if b.ID != "navy" || b.FadeText == nil || *b.FadeText != "#FFEE00" || b.Fade != nil || b.Formats.Dot != (labels.Style{Art: labels.ArtTop, Mono: true}) {
 		t.Fatalf("created %+v", b)
 	}
-	wantJSONError(t, e.do(t, "POST", "/api/backgrounds", labels.Background{Name: "Bad", Background: "blue", Text: "#FFFFFF"}), http.StatusBadRequest)
-	b.Text = "#EEEEEE"
-	wantStatus(t, e.do(t, "PUT", "/api/backgrounds/navy", b), http.StatusOK)
-	wantJSONError(t, e.do(t, "DELETE", "/api/backgrounds/black", nil), http.StatusForbidden)
-	wantStatus(t, e.do(t, "DELETE", "/api/backgrounds/navy", nil), http.StatusNoContent)
+	wantJSONError(t, e.do(t, "POST", "/api/themes", labels.Theme{Name: "Bad", Background: "blue", Text: "#FFFFFF"}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/themes", map[string]any{"name": "Odd", "background": "#000000", "text": "#FFFFFF", "formats": map[string]any{"small": map[string]any{"art": "sideways"}}}), http.StatusBadRequest)
+	wantStatus(t, e.do(t, "PUT", "/api/themes/navy", b), http.StatusOK)
+	wantJSONError(t, e.do(t, "DELETE", "/api/themes/black", nil), http.StatusForbidden)
+	wantStatus(t, e.do(t, "DELETE", "/api/themes/navy", nil), http.StatusNoContent)
 }
 
-func TestLayouts(t *testing.T) {
+func TestThemePreview(t *testing.T) {
 	e := newEnv(t, false)
-	w := e.do(t, "GET", "/api/layouts", nil)
+	th := map[string]any{"background": "#000000", "text": "#FFFFFF", "formats": map[string]any{}}
+	w := e.do(t, "POST", "/api/themes/preview", map[string]any{"theme": th, "template_id": "avery-5434", "title": "A", "subtitle": "B", "cover": "dark"})
 	wantStatus(t, w, http.StatusOK)
-	if got := decode[[]layoutInfo](t, w); len(got) != 1 || got[0].ID != "web-test" || got[0].Name != "Web test" {
+	if ct := w.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("content type %q", ct)
+	}
+	img, err := png.Decode(w.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := img.Bounds().Dx(); got != int(1.5*labels.DefaultPreviewPxPerIn) {
+		t.Errorf("width %d px", got)
+	}
+	// A format with no template uses its reference size.
+	w = e.do(t, "POST", "/api/themes/preview", map[string]any{"theme": th, "format": "dot", "title": "A"})
+	wantStatus(t, w, http.StatusOK)
+	wantJSONError(t, e.do(t, "POST", "/api/themes/preview", map[string]any{"theme": th, "format": "dot", "cover": "nope"}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/themes/preview", map[string]any{"theme": th, "format": "oval"}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/themes/preview", map[string]any{"theme": th, "template_id": "nope"}), http.StatusNotFound)
+}
+
+func TestLabelFormats(t *testing.T) {
+	e := newEnv(t, false)
+	w := e.do(t, "GET", "/api/label-formats", nil)
+	wantStatus(t, w, http.StatusOK)
+	got := decode[struct {
+		Formats    []formatInfo `json:"formats"`
+		Placements []labels.Art `json:"placements"`
+		Covers     []string     `json:"covers"`
+	}](t, w)
+	if len(got.Formats) != 3 || got.Formats[1].ID != labels.FormatLarge || got.Formats[1].DefaultArt != labels.ArtLeft || !got.Formats[2].Round || len(got.Placements) != 6 || len(got.Covers) != 3 {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -851,7 +871,7 @@ func TestPrintPreview(t *testing.T) {
 		t.Fatalf("slots %v", got.Pages[0])
 	}
 	job := e.lbl.lastJob(t)
-	if job.Background.ID != "white" || job.InsetMM != 1.5 || job.BleedMM != 1.5 || job.EdgeBleedMM != 0.4 || job.OuterBleedMM != model.DefaultOuterBleedMM {
+	if job.Theme.ID != "white" || job.InsetMM != 1.5 || job.BleedMM != 1.5 || job.EdgeBleedMM != 0.4 || job.OuterBleedMM != model.DefaultOuterBleedMM {
 		t.Fatalf("job %+v", job)
 	}
 	if len(got.MissingArt) != 0 {
@@ -903,7 +923,7 @@ func TestPrintPreview(t *testing.T) {
 	}
 	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{"nope"}, TemplateID: "avery-5434"}), http.StatusNotFound)
 	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID}, TemplateID: "nope"}), http.StatusNotFound)
-	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", BackgroundID: "nope"}), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", ThemeID: "nope"}), http.StatusNotFound)
 }
 
 func TestPrintPDF(t *testing.T) {
@@ -913,7 +933,7 @@ func TestPrintPDF(t *testing.T) {
 	b := e.mustCreate(t, model.Record{Name: "No Art", Items: media("apple_music://album/1")})
 	e.art.fail[b.ID] = true
 
-	w := e.do(t, "POST", "/api/print/pdf", printRequest{RecordIDs: []string{a.ID, b.ID}, TemplateID: "avery-5260", BackgroundID: "black"})
+	w := e.do(t, "POST", "/api/print/pdf", printRequest{RecordIDs: []string{a.ID, b.ID}, TemplateID: "avery-5260", ThemeID: "black"})
 	wantStatus(t, w, http.StatusOK)
 	if ct := w.Header().Get("Content-Type"); ct != "application/pdf" {
 		t.Fatalf("content type %q", ct)
@@ -926,7 +946,7 @@ func TestPrintPDF(t *testing.T) {
 		t.Fatalf("disposition %q", cd)
 	}
 	job := e.lbl.lastJob(t)
-	if len(job.Items) != 2 || job.Background.ID != "black" {
+	if len(job.Items) != 2 || job.Theme.ID != "black" {
 		t.Fatalf("job %+v", job)
 	}
 	if job.Items[0].Title != "Custom title" || job.Items[0].Subtitle != "Essential" || job.Items[0].Art == nil {
@@ -1018,7 +1038,7 @@ func TestUI(t *testing.T) {
 		}
 	}
 
-	for _, f := range []string{"app.js", "lib.js", "fuzzy.js", "records.js", "tags.js", "print.js", "templates.js", "backgrounds.js", "settings.js"} {
+	for _, f := range []string{"app.js", "lib.js", "fuzzy.js", "records.js", "tags.js", "print.js", "templates.js", "themes.js", "settings.js"} {
 		w := e.do(t, "GET", "/"+f, nil)
 		wantStatus(t, w, http.StatusOK)
 		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
@@ -1061,7 +1081,7 @@ func TestSupervisorClientFilter(t *testing.T) {
 
 func TestPDFNames(t *testing.T) {
 	job := func(titles ...string) labels.Job {
-		j := labels.Job{Template: labels.Template{ID: "avery-5260"}, Background: labels.Background{ID: "black"}, Copies: 1, StartRow: 1, StartCol: 1}
+		j := labels.Job{Template: labels.Template{ID: "avery-5260"}, Theme: labels.Theme{ID: "black"}, Copies: 1, StartRow: 1, StartCol: 1}
 		for _, title := range titles {
 			j.Items = append(j.Items, labels.Item{Title: title})
 		}
@@ -1133,23 +1153,23 @@ func TestPDFNames(t *testing.T) {
 	}
 }
 
-func TestDefaultBackground(t *testing.T) {
+func TestDefaultTheme(t *testing.T) {
 	e := newEnv(t, false)
 	a := e.mustCreate(t, model.Record{Name: "Metallica — Essential", Items: media("apple_music://album/1")})
 	print := func() string {
 		t.Helper()
 		w := e.do(t, "POST", "/api/print/pdf", printRequest{RecordIDs: []string{a.ID}, TemplateID: "avery-5260"})
 		wantStatus(t, w, http.StatusOK)
-		return e.lbl.lastJob(t).Background.ID
+		return e.lbl.lastJob(t).Theme.ID
 	}
-	if got := print(); got != model.DefaultBackgroundID {
+	if got := print(); got != model.DefaultThemeID {
 		t.Fatalf("no default: background %q, want white", got)
 	}
 
-	wantStatus(t, e.do(t, "PUT", "/api/print/default-background/nope", nil), http.StatusNotFound)
-	w := e.do(t, "PUT", "/api/print/default-background/black", nil)
+	wantStatus(t, e.do(t, "PUT", "/api/print/default-theme/nope", nil), http.StatusNotFound)
+	w := e.do(t, "PUT", "/api/print/default-theme/black", nil)
 	wantStatus(t, w, http.StatusOK)
-	if got := e.settings.Settings().Print.DefaultBackground; got != "black" {
+	if got := e.settings.Settings().Print.DefaultTheme; got != "black" {
 		t.Fatalf("saved default %q", got)
 	}
 	if got := print(); got != "black" {
@@ -1157,10 +1177,10 @@ func TestDefaultBackground(t *testing.T) {
 	}
 
 	// A default that no longer exists falls back to white.
-	if err := e.settings.Update(func(v *model.Settings) error { v.Print.DefaultBackground = "deleted"; return nil }); err != nil {
+	if err := e.settings.Update(func(v *model.Settings) error { v.Print.DefaultTheme = "deleted"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if got := print(); got != model.DefaultBackgroundID {
+	if got := print(); got != model.DefaultThemeID {
 		t.Errorf("deleted default: background %q, want white", got)
 	}
 }

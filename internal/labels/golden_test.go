@@ -77,10 +77,10 @@ func TestGoldenRender(t *testing.T) {
 	}
 	for _, c := range goldenCases {
 		job := labels.Job{
-			Template:   builtinTemplate(t, c.Template),
-			Background: builtinBackground(t, c.Background),
-			Items:      items,
-			StartRow:   c.StartRow, StartCol: c.StartCol,
+			Template: builtinTemplate(t, c.Template),
+			Theme:    builtinTheme(t, c.Background),
+			Items:    items,
+			StartRow: c.StartRow, StartCol: c.StartCol,
 			Offset:  model.Offset{XMM: c.OffsetX, YMM: c.OffsetY},
 			InsetMM: goldenInsetMM, BleedMM: goldenBleedMM, EdgeBleedMM: goldenEdgeBleedMM,
 		}

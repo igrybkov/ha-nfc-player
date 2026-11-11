@@ -57,6 +57,11 @@ nav a[aria-current] { background: var(--primary); color: var(--primary-fg); }
 main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .toolbar.sticky-top { position: sticky; top: var(--nav-h, 0); z-index: 1; background: var(--bg); padding: 8px 0; margin-top: -8px; border-bottom: 1px solid var(--line); }
+.label-preview { display: block; max-width: 100%; height: auto; flex: none; }
+.label-preview:not([src]) { aspect-ratio: 1.5; background: var(--line); border-radius: 6px; }
+.label-preview.failed { outline: 2px solid var(--danger, #e53935); }
+.preview-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.preview-title { font-size: 0.95em; margin: 4px 0 6px; }
 .badge.dirty { border-color: var(--warn-line); background: var(--warn-bg); margin-left: 0; padding: 2px 8px; }
 
 /* Controls */
@@ -177,12 +182,6 @@ svg.outline .label { fill: none; stroke: var(--primary); stroke-width: 0.015; }
 ul.error { margin: 0; padding-left: 18px; }
 
 /* Backgrounds: a label mock-up with art fading into the background. */
-.bg-sample { width: 180px; aspect-ratio: 1.5; border-radius: 6px; overflow: hidden; position: relative; background: var(--s-bg); border: 1px solid var(--line); flex: none; }
-.bg-sample .bg-art { position: absolute; inset: 0 0 35%; background: linear-gradient(135deg, #8e24aa, #f4511e 60%, #fdd835); }
-.bg-sample .bg-text { position: absolute; inset: 35% 0 0; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px; color: var(--s-fg); background: linear-gradient(to bottom, transparent, var(--s-fade) 50%, var(--s-bg)); }
-.bg-sample .bg-text span { opacity: 0.85; }
-.bg-sample.small { width: 72px; font-size: 0.6em; }
-.bg-sample.small .bg-text { padding: 4px; }
 
 /* Toasts */
 #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 10; width: min(92vw, 420px); }

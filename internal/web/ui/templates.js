@@ -21,7 +21,7 @@ export async function render(view, rest, params) {
         h('div', { class: 'grow' },
           h('a', { class: 'title', href: `#/templates/edit/${encodeURIComponent(t.id)}`, text: t.name }),
           h('div', { class: 'muted small' },
-            `${t.id} · ${t.grid.cols}×${t.grid.rows} · ${t.label.width_in}×${t.label.height_in} in · ${t.layout}`,
+            `${t.id} · ${t.grid.cols}×${t.grid.rows} · ${t.label.width_in}×${t.label.height_in} in · ${FORMAT_NAMES[t.format] ?? t.format}`,
             t.builtin && h('span', { class: 'badge', text: 'built-in' }))),
         h('a', { class: 'button', href: `#/templates/new?from=${encodeURIComponent(t.id)}`, text: 'Duplicate' }))))),
   );
@@ -36,6 +36,9 @@ const NUMBERS = [
   ['Column gap (in)', 'gap.col_in', 0.03125], ['Row gap (in)', 'gap.row_in', 0.03125],
   ['Title size (pt)', 'font.title_pt', 0.5], ['Subtitle size (pt)', 'font.subtitle_pt', 0.5],
 ];
+
+// Formats a theme styles separately; a dot is round.
+const FORMAT_NAMES = { small: 'Small label', large: 'Large label', dot: 'Dot (round)' };
 
 const getPath = (o, p) => p.split('.').reduce((v, k) => v[k], o);
 const setPath = (o, p, v) => { const ks = p.split('.'); ks.slice(0, -1).reduce((x, k) => x[k], o)[ks.at(-1)] = v; };
@@ -67,11 +70,12 @@ function outline(t) {
   const ok = t.grid.cols > 0 && t.grid.rows > 0 && t.grid.cols * t.grid.rows <= 1000;
   for (let r = 0; ok && r < t.grid.rows; r++) {
     for (let c = 0; c < t.grid.cols; c++) {
-      root.append(svg('rect', {
-        x: t.margin.left_in + c * (t.label.width_in + t.gap.col_in),
-        y: t.margin.top_in + r * (t.label.height_in + t.gap.row_in),
-        width: t.label.width_in, height: t.label.height_in, rx: 0.04, class: 'label',
-      }));
+      const x = t.margin.left_in + c * (t.label.width_in + t.gap.col_in);
+      const y = t.margin.top_in + r * (t.label.height_in + t.gap.row_in);
+      const { width_in: w, height_in: hh } = t.label;
+      root.append(t.format === 'dot'
+        ? svg('ellipse', { cx: x + w / 2, cy: y + hh / 2, rx: w / 2, ry: hh / 2, class: 'label' })
+        : svg('rect', { x, y, width: w, height: hh, rx: 0.04, class: 'label' }));
     }
   }
   return root;
@@ -84,7 +88,6 @@ async function editor(view, tpl, isNew) {
   }
   const t = structuredClone(tpl);
   const ro = t.builtin;
-  const layouts = await get('api/layouts').catch(() => [{ id: t.layout, name: t.layout }]);
 
   const preview = h('div', { class: 'outline-box' });
   const issues = h('ul', { class: 'error small' });
@@ -96,8 +99,8 @@ async function editor(view, tpl, isNew) {
   const name = h('input', { value: t.name, disabled: ro, required: true });
   name.addEventListener('input', () => { t.name = name.value; });
   const id = h('input', { value: t.id, disabled: !isNew, placeholder: 'From name', pattern: '[a-z0-9\\-]*' });
-  const layout = select(layouts.map((l) => [l.id, l.name]), t.layout, { disabled: ro });
-  layout.addEventListener('change', () => { t.layout = layout.value; });
+  const format = select(Object.entries(FORMAT_NAMES), t.format, { disabled: ro });
+  format.addEventListener('change', () => { t.format = format.value; redraw(); });
   const numbers = NUMBERS.map(([label, path, step]) => {
     const input = num(getPath(t, path), { step, min: 0, disabled: ro });
     input.addEventListener('input', () => { setPath(t, path, readNum(input) ?? 0); redraw(); });
@@ -122,12 +125,12 @@ async function editor(view, tpl, isNew) {
   h('div', { class: 'cols' },
     h('div', { class: 'stack' },
       field('Name', name), field('ID', id, isNew ? 'Optional. Lower case, digits and dashes.' : null),
-      field('Layout', layout),
+      field('Format', format, 'Themes set where the art goes for each format.'),
       h('div', { class: 'grid2' }, numbers),
       issues),
     h('div', { class: 'stack' }, preview,
       h('button', { type: 'button', text: 'PDF outline preview', onclick: () => {
-        openPDF({ template: t, sample: t.grid.cols * t.grid.rows, background_id: 'white', outline: true });
+        openPDF({ template: t, sample: t.grid.cols * t.grid.rows, theme_id: 'white', outline: true });
       } }))),
   h('div', { class: 'actions' },
     save,

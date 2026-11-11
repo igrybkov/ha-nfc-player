@@ -48,8 +48,21 @@ func (b TextBlock) Height() float64 {
 }
 
 // Draw draws the block with its bottom edge at bottomY (Y down), subtitle at
-// the bottom and title above it, in the current text color.
+// the bottom and title above it, left-aligned at x, in the current text
+// color.
 func (b TextBlock) Draw(c Canvas, x, bottomY float64) error {
+	return b.draw(c, bottomY, func(string) (float64, error) { return x, nil })
+}
+
+// DrawCentered draws the block like Draw, each line centered on centerX.
+func (b TextBlock) DrawCentered(c Canvas, centerX, bottomY float64) error {
+	return b.draw(c, bottomY, func(line string) (float64, error) {
+		w, err := c.TextWidth(line)
+		return centerX - w/2, err
+	})
+}
+
+func (b TextBlock) draw(c Canvas, bottomY float64, lineX func(string) (float64, error)) error {
 	cursor := 0.0 // distance above bottomY
 	for _, part := range []struct {
 		style FontStyle
@@ -63,6 +76,10 @@ func (b TextBlock) Draw(c Canvas, x, bottomY float64) error {
 			return err
 		}
 		for i := len(part.lines) - 1; i >= 0; i-- {
+			x, err := lineX(part.lines[i])
+			if err != nil {
+				return err
+			}
 			if err := c.Text(x, bottomY-cursor-part.size*baselineRise, part.lines[i]); err != nil {
 				return err
 			}
@@ -159,16 +176,4 @@ func wrap(c Canvas, text string, width float64) ([]string, error) {
 		lines = append(lines, cur)
 	}
 	return lines, nil
-}
-
-// DrawTextOnly draws a label with no art: the text block bottom-aligned at
-// LabelPad inside cell, in the background's text color (script behavior for
-// both layouts).
-func DrawTextOnly(c Canvas, cell Rect, item Item, bg Background, t Template) error {
-	block, err := FitTextBlock(c, item.Title, item.Subtitle, cell.W-2*LabelPad, t.Font)
-	if err != nil {
-		return err
-	}
-	c.SetTextColor(bg.TextColor())
-	return block.Draw(c, cell.X+LabelPad, cell.Y+cell.H-LabelPad)
 }

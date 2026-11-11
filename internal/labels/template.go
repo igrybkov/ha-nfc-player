@@ -1,40 +1,25 @@
-// Package labels renders label sheets to PDF: templates, backgrounds,
-// pluggable layouts, slot math and the PDF canvas.
+// Package labels renders label sheets to PDF and single labels to PNG:
+// templates, themes, slot math and the canvases.
 //
 // The geometry is a port of
 // docs/reference/nfc-music-labels.py, which was tuned against real paper.
 //
 // # Coordinates
 //
-// Everything a layout sees is in points (1 in = 72 pt), origin at the top-left
-// of the page, Y down. Render computes each slot, fills the bleed for non-white
-// backgrounds, clips to the slot shrunk by the inset (rounded corners), and
-// calls the layout with that inset rect as cell. A layout never needs to know
-// about offsets, bleed or clipping.
+// Everything drawLabel sees is in points (1 in = 72 pt), origin at the
+// top-left of the page, Y down. Render computes each slot, fills the bleed
+// for non-white themes, clips to the slot shrunk by the inset (rounded
+// corners, or an ellipse for dots), and draws the label in that inset rect.
+// The PDF and the PNG preview share this path (drawSlot), so the preview
+// shows what prints.
 //
-// # Adding a layout
+// # Formats and themes
 //
-// Add one file to internal/labels/layouts:
-//
-//	package layouts
-//
-//	import "github.com/igrybkov/ha-nfc-player/internal/labels"
-//
-//	func init() { labels.RegisterLayout(myLayout{}) }
-//
-//	type myLayout struct{}
-//
-//	func (myLayout) ID() string   { return "my-layout" } // used in templates
-//	func (myLayout) Name() string { return "My layout" } // shown in the UI
-//	func (myLayout) Draw(c labels.Canvas, cell labels.Rect, item labels.Item, bg labels.Background, t labels.Template) error {
-//		...
-//	}
-//
-// Helpers for layouts: FitTextBlock (wrap, shrink and ellipsize title and
-// subtitle, then draw them bottom-aligned), CropToRatio, ResizeArt and
-// ArtPixels (art at ArtDPI), FadeBottom (gradient composited into the art),
-// and LabelPad. The labels package must not import layouts; the binary
-// blank-imports it.
+// A template is paper: page, label size, grid and font sizes, plus its
+// format (small, large or dot). A theme is the look: colors, and for each
+// format where the art goes (left, right, top, bottom, background, none)
+// and whether it prints in gray. A print uses the theme's style for the
+// template's format.
 package labels
 
 import (
@@ -55,7 +40,7 @@ type Template struct {
 	Grid    Grid      `yaml:"grid" json:"grid"`
 	Margin  Margin    `yaml:"margin" json:"margin"`
 	Gap     Gap       `yaml:"gap" json:"gap"`
-	Layout  string    `yaml:"layout" json:"layout"` // registered Layout ID
+	Format  Format    `yaml:"format" json:"format"`
 	Font    FontSizes `yaml:"font" json:"font"`
 }
 
@@ -114,7 +99,7 @@ const (
 )
 
 // Validate checks sizes, that the grid fits the page and that the layout is
-// registered. Uniqueness of ids is checked by ValidateTemplates.
+// known. Uniqueness of ids is checked by ValidateTemplates.
 func (t Template) Validate() error {
 	var errs []error
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
@@ -170,8 +155,8 @@ func (t Template) Validate() error {
 			add("grid is %.4g in tall with the top margin; page is %.4g in", h, t.Page.HeightIn)
 		}
 	}
-	if _, ok := LookupLayout(t.Layout); !ok {
-		add("layout %q is not registered", t.Layout)
+	if !t.Format.valid() {
+		add("format %q is not one of %v", t.Format, FormatList)
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("template %q: %w", t.ID, err)
@@ -205,4 +190,44 @@ func ValidateTemplates(ts []Template) error {
 		seen[t.ID] = true
 	}
 	return errors.Join(errs...)
+}
+
+// Format is the kind of label a template prints. A theme sets its look per
+// format.
+type Format string
+
+const (
+	FormatSmall Format = "small" // a small rectangle, like Avery 5434 (1.5×1 in)
+	FormatLarge Format = "large" // a wide rectangle, like Avery 5260 (2.625×1 in)
+	FormatDot   Format = "dot"   // a round label
+)
+
+// FormatList lists every format, in the order the UI shows them.
+var FormatList = []Format{FormatSmall, FormatLarge, FormatDot}
+
+func (f Format) valid() bool { return f == FormatSmall || f == FormatLarge || f == FormatDot }
+
+// Round reports whether labels of this format are round.
+func (f Format) Round() bool { return f == FormatDot }
+
+// DefaultArt is the placement a theme uses when it sets none: art behind
+// the text on small labels and dots, art left on large labels.
+func (f Format) DefaultArt() Art {
+	if f == FormatLarge {
+		return ArtLeft
+	}
+	return ArtBackground
+}
+
+// Reference is the label size and font sizes that previews of the format
+// use when no template of that format exists.
+func (f Format) Reference() (Size, FontSizes) {
+	switch f {
+	case FormatLarge:
+		return Size{WidthIn: 2.625, HeightIn: 1}, FontSizes{TitlePt: 11, SubtitlePt: 8.5}
+	case FormatDot:
+		return Size{WidthIn: 1.5, HeightIn: 1.5}, FontSizes{TitlePt: 9, SubtitlePt: 7}
+	default:
+		return Size{WidthIn: 1.5, HeightIn: 1}, FontSizes{TitlePt: 8, SubtitlePt: 6.5}
+	}
 }

@@ -170,9 +170,9 @@ type PrintSettings struct {
 	// OuterBleedMM is extra bleed on the paper-edge side of the first and
 	// last columns, where printers drift the most; nil = DefaultOuterBleedMM.
 	OuterBleedMM *float64 `yaml:"outer_bleed_mm" json:"outer_bleed_mm"`
-	// DefaultBackground is the background id a print starts with; "" or an
-	// id that no longer exists means DefaultBackgroundID.
-	DefaultBackground string `yaml:"default_background" json:"default_background"`
+	// DefaultTheme is the theme id a print starts with; "" or an id that no
+	// longer exists means DefaultThemeID.
+	DefaultTheme string `yaml:"default_theme" json:"default_theme"`
 }
 
 // DefaultOuterBleedMM is PrintSettings.OuterBleedMM when unset.
@@ -186,8 +186,8 @@ func (p PrintSettings) OuterBleed() float64 {
 	return *p.OuterBleedMM
 }
 
-// DefaultBackgroundID is the background used when none is chosen.
-const DefaultBackgroundID = "white"
+// DefaultThemeID is the theme used when none is chosen.
+const DefaultThemeID = "white"
 
 // Offset shifts the print, in mm. Positive Y moves the print up.
 type Offset struct {

@@ -23,8 +23,9 @@ runs on `amd64` and `aarch64`.
 - Records and all Home Assistant tags in a web UI in the sidebar
   (Ingress): rename and delete tags, see what each one plays.
 - Recent scans list, to see what matched and what failed.
-- Label printing to PDF. Layouts, templates and backgrounds are pluggable.
-  You can add templates and backgrounds from the UI.
+- Label printing to PDF. Templates describe the paper; themes set colors
+  and where the art goes on small labels, large labels and dots. The theme
+  editor previews a theme on every template, drawn by the print code.
 - Data lives as plain YAML in your Home Assistant config folder, so it is
   in your backups and in git.
 
@@ -98,17 +99,18 @@ doc.
 `player.NewRouter` in `cmd/nfc-player/main.go`. Its name can then be used in
 `settings.yaml` (`players.default`) and per record.
 
-**Add a label layout.** Add a file in `internal/labels/layouts/` with a type
-that implements `labels.Layout` (`ID`, `Name`, `Draw`). Register it in
-`init()` with `labels.RegisterLayout`. It shows up in `api/layouts` and the
-UI.
+**Add an art placement.** Add an `Art` value in
+`internal/labels/theme.go` and its case in `drawLabel`
+(`internal/labels/draw.go`). The PDF and the PNG preview both draw through
+`drawSlot`, so the preview shows it too.
 
 **Add a template.** Add one on the templates page of the UI. It is saved to
 `templates.yaml`. To ship a built-in one, add it to
 `internal/labels/builtin/templates.yaml`.
 
-**Add a background.** Same as templates: the UI saves to `backgrounds.yaml`.
-Built-ins live in `internal/labels/builtin/backgrounds.yaml`.
+**Add a theme.** Same as templates: the UI saves to `themes.yaml`.
+Built-ins live in `internal/labels/builtin/themes.yaml`. The sample covers
+in the previews come from `assets/samples/gen.go`.
 
 ## Release
 

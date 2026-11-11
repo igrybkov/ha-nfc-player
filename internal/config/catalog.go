@@ -12,7 +12,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
 
-// Errors of the template and background stores.
+// Errors of the template and theme stores.
 var (
 	ErrNotFound  = errors.New("not found")
 	ErrDuplicate = errors.New("duplicate id")
@@ -28,16 +28,14 @@ type TemplatesFile struct {
 // DefaultTemplatesFile is the content of a new templates.yaml.
 func DefaultTemplatesFile() TemplatesFile { return TemplatesFile{Templates: []labels.Template{}} }
 
-// BackgroundsFile is the content of backgrounds.yaml: the user backgrounds.
-type BackgroundsFile struct {
-	Version     int                 `yaml:"version" json:"version"`
-	Backgrounds []labels.Background `yaml:"backgrounds" json:"backgrounds"`
+// ThemesFile is the content of themes.yaml: the user themes.
+type ThemesFile struct {
+	Version int            `yaml:"version" json:"version"`
+	Themes  []labels.Theme `yaml:"themes" json:"themes"`
 }
 
-// DefaultBackgroundsFile is the content of a new backgrounds.yaml.
-func DefaultBackgroundsFile() BackgroundsFile {
-	return BackgroundsFile{Backgrounds: []labels.Background{}}
-}
+// DefaultThemesFile is the content of a new themes.yaml.
+func DefaultThemesFile() ThemesFile { return ThemesFile{Themes: []labels.Theme{}} }
 
 // TemplateStore serves label templates: the embedded built-ins plus the user
 // templates in templates.yaml. Built-ins are read-only.
@@ -61,29 +59,29 @@ func NewTemplateStore(f *store.File[TemplatesFile]) (*TemplateStore, error) {
 	}}, nil
 }
 
-// BackgroundStore serves label backgrounds: the embedded built-ins plus the
-// user backgrounds in backgrounds.yaml. Built-ins are read-only.
-type BackgroundStore struct {
-	catalog[BackgroundsFile, labels.Background]
+// ThemeStore serves label themes: the embedded built-ins plus the user
+// themes in themes.yaml. Built-ins are read-only.
+type ThemeStore struct {
+	catalog[ThemesFile, labels.Theme]
 }
 
-// NewBackgroundStore returns a BackgroundStore on f (user backgrounds only).
-// Open f with DefaultBackgroundsFile as the default.
-func NewBackgroundStore(f *store.File[BackgroundsFile]) (*BackgroundStore, error) {
-	builtins, err := labels.BuiltinBackgrounds()
+// NewThemeStore returns a ThemeStore on f (user themes only). Open f with
+// DefaultThemesFile as the default.
+func NewThemeStore(f *store.File[ThemesFile]) (*ThemeStore, error) {
+	builtins, err := labels.BuiltinThemes()
 	if err != nil {
-		return nil, fmt.Errorf("built-in backgrounds: %w", err)
+		return nil, fmt.Errorf("built-in themes: %w", err)
 	}
-	return &BackgroundStore{catalog[BackgroundsFile, labels.Background]{
+	return &ThemeStore{catalog[ThemesFile, labels.Theme]{
 		file:     f,
-		list:     func(f *BackgroundsFile) *[]labels.Background { return &f.Backgrounds },
+		list:     func(f *ThemesFile) *[]labels.Theme { return &f.Themes },
 		builtins: builtins,
-		fields:   func(b *labels.Background) (*string, *string, *bool) { return &b.ID, &b.Name, &b.Builtin },
-		validate: labels.Background.Validate,
+		fields:   func(b *labels.Theme) (*string, *string, *bool) { return &b.ID, &b.Name, &b.Builtin },
+		validate: labels.Theme.Validate,
 	}}, nil
 }
 
-// catalog is the shared logic of TemplateStore and BackgroundStore. F is
+// catalog is the shared logic of TemplateStore and ThemeStore. F is
 // the file type; list points at its user items.
 type catalog[F, T any] struct {
 	file     *store.File[F]

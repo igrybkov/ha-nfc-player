@@ -4,23 +4,23 @@ import {
 } from './lib.js';
 
 // Kept across visits so a half-done print setup survives a detour.
-// background '' = the default background from settings.
-const state = { selected: [], template: '', background: '', copies: 1, row: 1, col: 1, skip: 0 };
+// theme '' = the default theme from settings.
+const state = { selected: [], template: '', theme: '', copies: 1, row: 1, col: 1, skip: 0 };
 
 // editLink opens the editor of a picked record.
 const editLink = (id) => `#/records/edit/${encodeURIComponent(id)}`;
 
 export async function render(view) {
-  const [records, templates, backgrounds, settings] = await Promise.all([
-    get('api/records'), get('api/templates'), get('api/backgrounds'), get('api/settings'),
+  const [records, templates, themes, settings] = await Promise.all([
+    get('api/records'), get('api/templates'), get('api/themes'), get('api/settings'),
   ]);
   const entries = byName(records);
   const byID = new Map(entries.map((e) => [e.id, e]));
   state.selected = state.selected.filter((id) => byID.has(id));
   if (!templates.some((t) => t.id === state.template)) state.template = templates[0]?.id ?? '';
-  if (!backgrounds.some((b) => b.id === state.background)) {
-    const def = settings.print.default_background;
-    state.background = (backgrounds.find((b) => b.id === def) ?? backgrounds.find((b) => b.id === 'white') ?? backgrounds[0])?.id ?? '';
+  if (!themes.some((b) => b.id === state.theme)) {
+    const def = settings.print.default_theme;
+    state.theme = (themes.find((b) => b.id === def) ?? themes.find((b) => b.id === 'white') ?? themes[0])?.id ?? '';
   }
   const tpl = () => templates.find((t) => t.id === state.template);
 
@@ -64,7 +64,7 @@ export async function render(view) {
 
   // Sheet options.
   const templateSel = select(templates.map((t) => [t.id, t.name]), state.template);
-  const bgSel = select(backgrounds.map((b) => [b.id, b.name]), state.background);
+  const themeSel = select(themes.map((b) => [b.id, b.name]), state.theme);
   const copies = num(state.copies, { min: 1, max: 100, step: 1 });
   const skip = num(state.skip, { min: 0, step: 1 });
   const offX = num(0, { step: 0.05 });
@@ -82,7 +82,7 @@ export async function render(view) {
     state.row = Math.min(state.row, g.rows); state.col = Math.min(state.col, g.cols);
     loadOffset(); schedulePreview();
   });
-  bgSel.addEventListener('change', () => { state.background = bgSel.value; });
+  themeSel.addEventListener('change', () => { state.theme = themeSel.value; });
   for (const [input, key] of [[copies, 'copies'], [skip, 'skip']]) {
     input.addEventListener('input', () => { state[key] = Math.max(0, readNum(input) ?? 0); schedulePreview(); });
   }
@@ -90,7 +90,7 @@ export async function render(view) {
   const job = (extra = {}) => ({
     record_ids: state.selected,
     template_id: state.template,
-    background_id: state.background,
+    theme_id: state.theme,
     copies: Math.max(1, state.copies),
     start_row: state.row,
     start_col: state.col,
@@ -195,7 +195,7 @@ export async function render(view) {
       h('section', { class: 'stack' }, sl.el, bulk, selectedBox),
       h('section', { class: 'stack' },
         field('Template', templateSel),
-        field('Background', bgSel),
+        field('Theme', themeSel),
         h('div', { class: 'grid2' }, field('Copies', copies), field('Skip slots', skip)),
         h('fieldset', {}, h('legend', { text: 'Offset (mm)' }),
           h('div', { class: 'grid2' }, field('X (right +)', offX), field('Y (up +)', offY)),

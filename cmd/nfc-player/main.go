@@ -24,7 +24,6 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/config"
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
-	_ "github.com/igrybkov/ha-nfc-player/internal/labels/layouts" // registers "side" and "full"
 	"github.com/igrybkov/ha-nfc-player/internal/migrate"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 	"github.com/igrybkov/ha-nfc-player/internal/player"
@@ -118,7 +117,7 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 		ln.Close()
 		return err
 	}
-	backgrounds, err := config.NewBackgroundStore(store.In(files, config.BackgroundsFileName, config.DefaultBackgroundsFile))
+	themes, err := config.NewThemeStore(store.In(files, config.ThemesFileName, config.DefaultThemesFile))
 	if err != nil {
 		ln.Close()
 		return err
@@ -147,7 +146,7 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	}
 
 	srv := web.New(web.Deps{
-		Records: recs, Settings: settings, Templates: templates, Backgrounds: backgrounds,
+		Records: recs, Settings: settings, Templates: templates, Themes: themes,
 		Play: handler, Scans: scans, Artwork: art, HATags: client, ArtPicker: picker, Titles: titles,
 		Supervisor: cfg.Supervisor, Logger: log,
 	})

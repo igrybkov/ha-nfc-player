@@ -22,3 +22,4 @@ print:
   inset_mm: 1.5
   bleed_mm: 1.5
   edge_bleed_mm: 0.4
+  default_background: navy

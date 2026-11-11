@@ -17,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
-	_ "github.com/igrybkov/ha-nfc-player/internal/labels/layouts"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 )
 
@@ -36,9 +35,9 @@ func builtinTemplate(t *testing.T, id string) labels.Template {
 	return labels.Template{}
 }
 
-func builtinBackground(t *testing.T, id string) labels.Background {
+func builtinTheme(t *testing.T, id string) labels.Theme {
 	t.Helper()
-	bs, err := labels.BuiltinBackgrounds()
+	bs, err := labels.BuiltinThemes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +46,8 @@ func builtinBackground(t *testing.T, id string) labels.Background {
 			return b
 		}
 	}
-	t.Fatalf("no builtin background %q", id)
-	return labels.Background{}
+	t.Fatalf("no builtin theme %q", id)
+	return labels.Theme{}
 }
 
 func TestBuiltinsValidate(t *testing.T) {
@@ -59,17 +58,12 @@ func TestBuiltinsValidate(t *testing.T) {
 	if err := labels.ValidateTemplates(ts); err != nil {
 		t.Error(err)
 	}
-	bs, err := labels.BuiltinBackgrounds()
+	bs, err := labels.BuiltinThemes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := labels.ValidateBackgrounds(bs); err != nil {
+	if err := labels.ValidateThemes(bs); err != nil {
 		t.Error(err)
-	}
-	for _, l := range []string{"side", "full"} {
-		if _, ok := labels.LookupLayout(l); !ok {
-			t.Errorf("layout %q not registered", l)
-		}
 	}
 }
 
@@ -85,7 +79,7 @@ func TestTemplateValidate(t *testing.T) {
 		{"zero rows", func(tp *labels.Template) { tp.Grid.Rows = 0 }, "grid.rows"},
 		{"negative gap", func(tp *labels.Template) { tp.Gap.ColIn = -0.1 }, "gap.col_in"},
 		{"zero font", func(tp *labels.Template) { tp.Font.SubtitlePt = 0 }, "font.subtitle_pt"},
-		{"unknown layout", func(tp *labels.Template) { tp.Layout = "nope" }, "not registered"},
+		{"unknown format", func(tp *labels.Template) { tp.Format = "nope" }, "format"},
 		{"no id", func(tp *labels.Template) { tp.ID = "" }, "id is required"},
 		{"too many slots", func(tp *labels.Template) { tp.Grid.Cols, tp.Grid.Rows = 40, 26 }, "grid.cols*grid.rows"},
 		{"overflowing grid", func(tp *labels.Template) { tp.Grid.Cols, tp.Grid.Rows = 1<<40, 1<<40 }, "grid.cols*grid.rows"},
@@ -110,7 +104,7 @@ func TestTemplateValidate(t *testing.T) {
 	}
 	// The caps themselves are allowed.
 	big := labels.Template{ID: "big", Page: labels.Size{WidthIn: 50, HeightIn: 50}, Label: labels.Size{WidthIn: 0.5, HeightIn: 1},
-		Grid: labels.Grid{Cols: 100, Rows: 10}, Layout: "side", Font: labels.FontSizes{TitlePt: 8, SubtitlePt: 6}}
+		Grid: labels.Grid{Cols: 100, Rows: 10}, Format: "large", Font: labels.FontSizes{TitlePt: 8, SubtitlePt: 6}}
 	if err := big.Validate(); err != nil {
 		t.Errorf("1000 slots on a 50 in page: %v", err)
 	}
@@ -123,15 +117,15 @@ func TestValidateDuplicateIDs(t *testing.T) {
 	if err := labels.ValidateTemplates([]labels.Template{tpl, user}); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("duplicate template ids: %v", err)
 	}
-	bg := builtinBackground(t, "black")
-	if err := labels.ValidateBackgrounds([]labels.Background{bg, bg}); err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Errorf("duplicate background ids: %v", err)
+	bg := builtinTheme(t, "black")
+	if err := labels.ValidateThemes([]labels.Theme{bg, bg}); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("duplicate theme ids: %v", err)
 	}
 }
 
-func TestBackgroundValidate(t *testing.T) {
+func TestThemeValidate(t *testing.T) {
 	bad := "red"
-	cases := []labels.Background{
+	cases := []labels.Theme{
 		{ID: "", Background: "#000000", Text: "#FFFFFF"},
 		{ID: "x", Background: "black", Text: "#FFFFFF"},
 		{ID: "x", Background: "#000000", Text: "#FFF"},
@@ -262,7 +256,7 @@ func TestRenderBuiltins(t *testing.T) {
 			tpl := builtinTemplate(t, c.template)
 			job := labels.Job{
 				Template:    tpl,
-				Background:  builtinBackground(t, c.background),
+				Theme:       builtinTheme(t, c.background),
 				Items:       sampleItems(),
 				Copies:      c.copies,
 				StartRow:    c.startRow,
@@ -283,19 +277,19 @@ func TestRenderBuiltins(t *testing.T) {
 
 func TestRenderOutlinePreview(t *testing.T) {
 	job := labels.Job{
-		Template:   builtinTemplate(t, "avery-5434"),
-		Background: builtinBackground(t, "white"),
-		Outline:    true,
+		Template: builtinTemplate(t, "avery-5434"),
+		Theme:    builtinTheme(t, "white"),
+		Outline:  true,
 	}
 	checkPDF(t, writePDF(t, t.TempDir(), "outline-5434.pdf", job), 1)
 }
 
 func TestRenderSharesArtAcrossCopies(t *testing.T) {
 	base := labels.Job{
-		Template:   builtinTemplate(t, "avery-5260"),
-		Background: builtinBackground(t, "white"),
-		Items:      sampleItems()[:1],
-		InsetMM:    1.5,
+		Template: builtinTemplate(t, "avery-5260"),
+		Theme:    builtinTheme(t, "white"),
+		Items:    sampleItems()[:1],
+		InsetMM:  1.5,
 	}
 	var one, many bytes.Buffer
 	if err := labels.Render(&one, base); err != nil {
@@ -314,16 +308,16 @@ func TestRenderSharesArtAcrossCopies(t *testing.T) {
 
 func TestRenderRejectsBadJobs(t *testing.T) {
 	good := labels.Job{
-		Template:   builtinTemplate(t, "avery-5260"),
-		Background: builtinBackground(t, "white"),
-		Items:      sampleItems()[:1],
+		Template: builtinTemplate(t, "avery-5260"),
+		Theme:    builtinTheme(t, "white"),
+		Items:    sampleItems()[:1],
 	}
 	cases := map[string]func(*labels.Job){
 		"no items":          func(j *labels.Job) { j.Items = nil },
 		"start out of grid": func(j *labels.Job) { j.StartRow = 11 },
 		"inset eats label":  func(j *labels.Job) { j.InsetMM = 13 },
-		"bad background":    func(j *labels.Job) { j.Background.Text = "white" },
-		"bad template":      func(j *labels.Job) { j.Template.Layout = "nope" },
+		"bad theme":         func(j *labels.Job) { j.Theme.Text = "white" },
+		"bad template":      func(j *labels.Job) { j.Template.Format = "nope" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -336,10 +330,10 @@ func TestRenderRejectsBadJobs(t *testing.T) {
 	}
 }
 
-func TestBuiltinBackgroundFadeColors(t *testing.T) {
+func TestBuiltinThemeFadeColors(t *testing.T) {
 	black, white := color.RGBA{0, 0, 0, 255}, color.RGBA{255, 255, 255, 255}
 	for _, id := range []string{"white", "black"} {
-		b := builtinBackground(t, id)
+		b := builtinTheme(t, id)
 		if b.Fade == nil || b.FadeText == nil {
 			t.Errorf("%s: fade and fade_text must be explicit", id)
 		}
@@ -381,7 +375,7 @@ func fillRects(t *testing.T, data []byte) [][4]float64 {
 func TestOuterBleed(t *testing.T) {
 	tpl := builtinTemplate(t, "avery-5260")
 	job := labels.Job{
-		Template: tpl, Background: builtinBackground(t, "black"),
+		Template: tpl, Theme: builtinTheme(t, "black"),
 		Items:   []labels.Item{{Title: "A"}, {Title: "B"}, {Title: "C"}},
 		InsetMM: 1.5, BleedMM: 1.5, EdgeBleedMM: 0.4, OuterBleedMM: 1,
 	}

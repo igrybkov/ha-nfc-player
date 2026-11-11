@@ -162,7 +162,7 @@ func TestRenderEmbedsFullFonts(t *testing.T) {
 		t.Run(bg, func(t *testing.T) {
 			job := labels.Job{
 				Template:    tpl,
-				Background:  builtinBackground(t, bg),
+				Theme:       builtinTheme(t, bg),
 				Items:       sampleItems()[:4],
 				Offset:      settings.Offsets[tpl.ID],
 				InsetMM:     settings.InsetMM,

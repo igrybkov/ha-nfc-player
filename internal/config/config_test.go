@@ -318,13 +318,13 @@ func TestTemplatesHandEditedBuiltinIDIsHidden(t *testing.T) {
 	}
 }
 
-func TestBackgroundsCRUD(t *testing.T) {
-	path := filepath.Join(t.TempDir(), BackgroundsFileName)
-	s, err := NewBackgroundStore(store.Open(path, DefaultBackgroundsFile))
+func TestThemesCRUD(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ThemesFileName)
+	s, err := NewThemeStore(store.Open(path, DefaultThemesFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.validate = func(b labels.Background) error {
+	s.validate = func(b labels.Theme) error {
 		if !strings.HasPrefix(b.Background, "#") {
 			return errors.New("bad color")
 		}
@@ -336,17 +336,17 @@ func TestBackgroundsCRUD(t *testing.T) {
 		t.Fatalf("builtins: %+v", all)
 	}
 	fade := "#112233"
-	b, err := s.Create(labels.Background{Name: "Navy", Background: "#000080", Text: "#FFFFFF", Fade: &fade})
+	b, err := s.Create(labels.Theme{Name: "Navy", Background: "#000080", Text: "#FFFFFF", Fade: &fade})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if b.ID != "navy" {
 		t.Fatalf("id = %q", b.ID)
 	}
-	if _, err := s.Create(labels.Background{Name: "Bad", Background: "red"}); !errors.Is(err, ErrInvalid) {
+	if _, err := s.Create(labels.Theme{Name: "Bad", Background: "red"}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("invalid: %v", err)
 	}
-	if _, err := s.Create(labels.Background{Name: " "}); !errors.Is(err, ErrInvalid) {
+	if _, err := s.Create(labels.Theme{Name: " "}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("no name: %v", err)
 	}
 	b.Text = "#EEEEEE"

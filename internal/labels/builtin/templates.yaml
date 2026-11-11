@@ -6,7 +6,7 @@
   grid: {cols: 3, rows: 10}
   margin: {left_in: 0.1875, top_in: 0.5}
   gap: {col_in: 0.125, row_in: 0}
-  layout: side
+  format: large
   font: {title_pt: 11, subtitle_pt: 8.5}
 - id: avery-5434
   name: Avery 5434 (4×6, 10 per sheet)
@@ -16,5 +16,5 @@
   grid: {cols: 2, rows: 5}
   margin: {left_in: 0.46875, top_in: 0.5}
   gap: {col_in: 0.0625, row_in: 0}
-  layout: full
+  format: small
   font: {title_pt: 8, subtitle_pt: 6.5}

@@ -201,22 +201,22 @@ func (s *Server) saveOffset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, o)
 }
 
-// setDefaultBackground makes a background the one prints start with.
-func (s *Server) setDefaultBackground(w http.ResponseWriter, r *http.Request) {
+// setDefaultTheme makes a theme the one prints start with.
+func (s *Server) setDefaultTheme(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, err := s.deps.Backgrounds.Get(id); err != nil {
+	if _, err := s.deps.Themes.Get(id); err != nil {
 		s.writeErr(w, r, err)
 		return
 	}
 	err := s.deps.Settings.Update(func(v *model.Settings) error {
-		v.Print.DefaultBackground = id
+		v.Print.DefaultTheme = id
 		return nil
 	})
 	if err != nil {
 		s.writeErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"default_background": id})
+	writeJSON(w, http.StatusOK, map[string]string{"default_theme": id})
 }
 
 func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
@@ -261,63 +261,4 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) listBackgrounds(w http.ResponseWriter, r *http.Request) {
-	all, err := s.deps.Backgrounds.List()
-	if err != nil {
-		s.log.Warn("web: load backgrounds", "err", err)
-	}
-	writeJSON(w, http.StatusOK, all)
-}
-
-func (s *Server) createBackground(w http.ResponseWriter, r *http.Request) {
-	var b labels.Background
-	if err := decodeJSON(w, r, &b); err != nil {
-		s.writeErr(w, r, err)
-		return
-	}
-	b, err := s.deps.Backgrounds.Create(b)
-	if err != nil {
-		s.writeErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, b)
-}
-
-func (s *Server) updateBackground(w http.ResponseWriter, r *http.Request) {
-	var b labels.Background
-	if err := decodeJSON(w, r, &b); err != nil {
-		s.writeErr(w, r, err)
-		return
-	}
-	b, err := s.deps.Backgrounds.Update(r.PathValue("id"), b)
-	if err != nil {
-		s.writeErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, b)
-}
-
-func (s *Server) deleteBackground(w http.ResponseWriter, r *http.Request) {
-	if err := s.deps.Backgrounds.Delete(r.PathValue("id")); err != nil {
-		s.writeErr(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-type layoutInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// listLayouts lists registered layouts; labels.Layouts sorts them by id.
-func (s *Server) listLayouts(w http.ResponseWriter, _ *http.Request) {
-	ls := s.lbl.Layouts()
-	out := make([]layoutInfo, 0, len(ls))
-	for _, l := range ls {
-		out = append(out, layoutInfo{ID: l.ID(), Name: l.Name()})
-	}
-	writeJSON(w, http.StatusOK, out)
 }

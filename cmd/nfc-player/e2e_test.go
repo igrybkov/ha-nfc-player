@@ -195,7 +195,7 @@ func TestEndToEnd(t *testing.T) {
 	// A PDF with art for three seed records on black, from row 2 column 2.
 	code, ct, body := a.post(t, "/api/print/pdf", map[string]any{
 		"record_ids":  []string{"metallica-essential", "disturbed-divisible", "volodymyr-ivasiuk"},
-		"template_id": "avery-5260", "background_id": "black", "start_row": 2, "start_col": 2,
+		"template_id": "avery-5260", "theme_id": "black", "start_row": 2, "start_col": 2,
 	})
 	if code != http.StatusOK || ct != "application/pdf" || !bytes.HasPrefix(body, []byte("%PDF-")) {
 		t.Errorf("print pdf: %d %s %.80q", code, ct, body)

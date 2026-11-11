@@ -21,21 +21,21 @@ import (
 )
 
 // printRequest is the body of api/print/preview and api/print/pdf. The server
-// fills the template, background, offsets and bleed values from storage, so
+// fills the template, theme, offsets and bleed values from storage, so
 // the UI sends ids only.
 type printRequest struct {
 	RecordIDs []string `json:"record_ids"`
 	// Sample adds placeholder labels without art, for template previews.
-	Sample       int              `json:"sample"`
-	TemplateID   string           `json:"template_id"`
-	Template     *labels.Template `json:"template"` // unsaved template; wins over template_id
-	BackgroundID string           `json:"background_id"`
-	Copies       int              `json:"copies"`    // 0 = 1
-	StartRow     int              `json:"start_row"` // 1-based; 0 = 1
-	StartCol     int              `json:"start_col"` // 1-based; 0 = 1
-	Skip         int              `json:"skip"`
-	Offset       *model.Offset    `json:"offset"` // nil = saved offset for the template
-	Outline      bool             `json:"outline"`
+	Sample     int              `json:"sample"`
+	TemplateID string           `json:"template_id"`
+	Template   *labels.Template `json:"template"` // unsaved template; wins over template_id
+	ThemeID    string           `json:"theme_id"`
+	Copies     int              `json:"copies"`    // 0 = 1
+	StartRow   int              `json:"start_row"` // 1-based; 0 = 1
+	StartCol   int              `json:"start_col"` // 1-based; 0 = 1
+	Skip       int              `json:"skip"`
+	Offset     *model.Offset    `json:"offset"` // nil = saved offset for the template
+	Outline    bool             `json:"outline"`
 }
 
 // Limits that keep one request from building a huge PDF.
@@ -190,11 +190,11 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Subject, error)
 		return job, nil, badRequest("template_id or template is required")
 	}
 
-	bg, err := s.background(req.BackgroundID)
+	th, err := s.theme(req.ThemeID)
 	if err != nil {
 		return job, nil, err
 	}
-	job.Background = bg
+	job.Theme = th
 
 	subs := make([]model.Subject, 0, len(req.RecordIDs))
 	for _, id := range req.RecordIDs {
@@ -286,18 +286,18 @@ func (s *Server) fetchArt(ctx context.Context, subs []model.Subject) []image.Ima
 	return art
 }
 
-// background returns the background id names. An empty id means the
-// default from settings, or DefaultBackgroundID when that one was deleted.
-func (s *Server) background(id string) (labels.Background, error) {
+// theme returns the theme id names. An empty id means the default from
+// settings, or DefaultThemeID when that one was deleted.
+func (s *Server) theme(id string) (labels.Theme, error) {
 	if id != "" {
-		return s.deps.Backgrounds.Get(id)
+		return s.deps.Themes.Get(id)
 	}
-	if def := s.deps.Settings.Settings().Print.DefaultBackground; def != "" {
-		if bg, err := s.deps.Backgrounds.Get(def); err == nil {
-			return bg, nil
+	if def := s.deps.Settings.Settings().Print.DefaultTheme; def != "" {
+		if th, err := s.deps.Themes.Get(def); err == nil {
+			return th, nil
 		}
 	}
-	return s.deps.Backgrounds.Get(model.DefaultBackgroundID)
+	return s.deps.Themes.Get(model.DefaultThemeID)
 }
 
 // pdfNameLen is the most characters of label titles in a PDF file name, and
@@ -322,7 +322,7 @@ func pdfNames(job labels.Job, recordIDs []string) (ascii, utf string) {
 	}
 	h := sha256.New()
 	fmt.Fprintf(h, "%q|%q|%s|%s|%d|%d|%d|%d|%g|%g|%t",
-		recordIDs, titles, job.Template.ID, job.Background.ID, job.Copies,
+		recordIDs, titles, job.Template.ID, job.Theme.ID, job.Copies,
 		job.StartRow, job.StartCol, job.Skip, job.Offset.XMM, job.Offset.YMM, job.Outline)
 	hash := strings.ToLower(base32.StdEncoding.EncodeToString(h.Sum(nil)))[:8]
 

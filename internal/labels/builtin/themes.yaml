@@ -1,3 +1,5 @@
+# Built-in themes. Placements left out use each format's default: art
+# left on large labels, art behind the text on small labels and dots.
 - id: white
   name: White
   builtin: true

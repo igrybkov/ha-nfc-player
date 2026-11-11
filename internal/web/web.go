@@ -29,25 +29,25 @@ type TagLister interface {
 type Labels interface {
 	Render(w io.Writer, job labels.Job) error
 	SheetMap(t labels.Template, job labels.Job) [][]labels.SlotState
-	Layouts() []labels.Layout
+	RenderPreview(w io.Writer, p labels.Preview) error
 	ValidateTemplate(t labels.Template) error
 }
 
 // Deps are the collaborators of the server.
 type Deps struct {
-	Records     *records.Store
-	Settings    *config.SettingsStore
-	Templates   *config.TemplateStore
-	Backgrounds *config.BackgroundStore
-	Play        model.PlayService
-	Scans       model.ScanLog
-	Artwork     model.ArtworkSource
-	HATags      TagLister
-	ArtPicker   ArtPicker   // nil = no art picker (routes answer 503)
-	Titles      TitleSource // nil = no media names (the route answers 503)
-	Labels      Labels      // nil = package labels
-	Supervisor  bool        // accept only 172.30.32.2 and localhost
-	Logger      *slog.Logger
+	Records    *records.Store
+	Settings   *config.SettingsStore
+	Templates  *config.TemplateStore
+	Themes     *config.ThemeStore
+	Play       model.PlayService
+	Scans      model.ScanLog
+	Artwork    model.ArtworkSource
+	HATags     TagLister
+	ArtPicker  ArtPicker   // nil = no art picker (routes answer 503)
+	Titles     TitleSource // nil = no media names (the route answers 503)
+	Labels     Labels      // nil = package labels
+	Supervisor bool        // accept only 172.30.32.2 and localhost
+	Logger     *slog.Logger
 }
 
 // Server serves the API and UI.
@@ -140,16 +140,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/templates/{id}", s.updateTemplate)
 	mux.HandleFunc("DELETE /api/templates/{id}", s.deleteTemplate)
 
-	mux.HandleFunc("GET /api/backgrounds", s.listBackgrounds)
-	mux.HandleFunc("POST /api/backgrounds", s.createBackground)
-	mux.HandleFunc("PUT /api/backgrounds/{id}", s.updateBackground)
-	mux.HandleFunc("DELETE /api/backgrounds/{id}", s.deleteBackground)
+	mux.HandleFunc("GET /api/themes", s.listThemes)
+	mux.HandleFunc("POST /api/themes", s.createTheme)
+	mux.HandleFunc("POST /api/themes/preview", s.themePreview)
+	mux.HandleFunc("PUT /api/themes/{id}", s.updateTheme)
+	mux.HandleFunc("DELETE /api/themes/{id}", s.deleteTheme)
 
-	mux.HandleFunc("GET /api/layouts", s.listLayouts)
+	mux.HandleFunc("GET /api/label-formats", s.labelFormats)
 	mux.HandleFunc("POST /api/print/preview", s.printPreview)
 	mux.HandleFunc("POST /api/print/pdf", s.printPDF)
 	mux.HandleFunc("PUT /api/print/offsets/{template}", s.saveOffset)
-	mux.HandleFunc("PUT /api/print/default-background/{id}", s.setDefaultBackground)
+	mux.HandleFunc("PUT /api/print/default-theme/{id}", s.setDefaultTheme)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint")
@@ -217,5 +218,7 @@ func (labelsPkg) Render(w io.Writer, job labels.Job) error { return labels.Rende
 func (labelsPkg) SheetMap(t labels.Template, job labels.Job) [][]labels.SlotState {
 	return labels.SheetMap(t, job)
 }
-func (labelsPkg) Layouts() []labels.Layout                 { return labels.Layouts() }
+func (labelsPkg) RenderPreview(w io.Writer, p labels.Preview) error {
+	return labels.RenderPreview(w, p)
+}
 func (labelsPkg) ValidateTemplate(t labels.Template) error { return t.Validate() }

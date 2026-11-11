@@ -18,7 +18,7 @@ type Item struct {
 // Job is one print run.
 type Job struct {
 	Template                      Template
-	Background                    Background
+	Theme                         Theme
 	Items                         []Item
 	Copies                        int
 	StartRow, StartCol            int // 1-based
