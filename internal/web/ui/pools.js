@@ -7,8 +7,8 @@ import {
 // ALL is the built-in pool of every tag. The API lists stored pools only.
 export const ALL = { id: 'all', name: 'All tags' };
 
-export async function render(view, rest) {
-  if (rest[0] === 'new') return editor(view, null);
+export async function render(view, rest, params) {
+  if (rest[0] === 'new') return editor(view, null, params);
   if (rest[0] === 'edit' && rest[1]) return editor(view, rest[1]);
   return list(view);
 }
@@ -127,13 +127,13 @@ function playBox(pools, entries) {
     result);
 }
 
-function blankPool() {
-  return { id: '', name: '', items: [], shuffle: null, repeat: null, volume: null, player: null };
+function blankPool(params) {
+  return { id: '', name: params?.get('name') || '', items: [], shuffle: null, repeat: null, volume: null, player: null };
 }
 
-async function editor(view, id) {
+async function editor(view, id, params) {
   const [{ pools }, entries, settings] = await Promise.all([get('api/pools'), get('api/tags'), get('api/settings')]);
-  const pool = id ? pools.find((p) => p.id === id) : blankPool();
+  const pool = id ? pools.find((p) => p.id === id) : blankPool(params);
   if (!pool) {
     view.replaceChildren(h('p', { class: 'error', text: `No pool with id ${id}.` }), h('a', { href: '#/pools', text: 'Back to pools' }));
     return null;

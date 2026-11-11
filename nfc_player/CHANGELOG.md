@@ -4,6 +4,8 @@
 
 - **Unknown scans → Rename** renames the tag in Home Assistant. The row
   then shows the new name, and **Create entry** starts with it.
+- **Unknown scans → Create pool** starts a pool named after the tag. A tag
+  whose name plays a pool no longer shows as unknown.
 
 ## 0.3.1
 

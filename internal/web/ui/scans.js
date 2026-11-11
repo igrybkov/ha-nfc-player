@@ -26,6 +26,13 @@ function createLink(s) {
   return `#/tags/new?${q}`;
 }
 
+// A pool matches tags by name only, so the link carries no tag id.
+function poolLink(s) {
+  const q = new URLSearchParams();
+  if (nameOf(s)) q.set('name', nameOf(s).split('|')[0].trim());
+  return `#/pools/new?${q}`;
+}
+
 // unknownRow shows an unknown tag. Rename swaps the title for an input
 // that saves the name to the HA tag, so the tag and its entry share it.
 function unknownRow(s, reload) {
@@ -34,6 +41,8 @@ function unknownRow(s, reload) {
   const show = () => li.replaceChildren(h('div', { class: 'row' },
     h('div', { class: 'grow' }, h('div', { class: 'title', text: nameOf(s) || '(no name)' }), info),
     s.tag_id && h('button', { type: 'button', text: 'Rename', onclick: edit }),
+    h('a', { class: 'button', href: poolLink(s), text: 'Create pool',
+      title: 'A pool plays for every tag with its name. Rename the tag first if its name is a placeholder.' }),
     h('a', { class: 'button primary', href: createLink(s), text: 'Create entry' })));
 
   function edit() {
@@ -65,7 +74,7 @@ export async function render(view) {
   // One row per tag; scans are newest first, so the first one wins.
   const seen = new Set();
   const unknown = scans.filter((s) => {
-    if (!isTagScan(s) || s.result !== 'no_match' || s.matches_entry) return false;
+    if (!isTagScan(s) || s.result !== 'no_match' || s.matches_entry || s.matches_pool) return false;
     const key = s.tag_id || `name|${s.tag_name}`;
     if (seen.has(key)) return false;
     seen.add(key);

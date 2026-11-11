@@ -107,6 +107,7 @@ type scanView struct {
 	model.Scan
 	HAName       string `json:"ha_name,omitempty"`
 	MatchesEntry string `json:"matches_entry"`
+	MatchesPool  string `json:"matches_pool"` // pool id the name plays, when no entry matches
 }
 
 func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +122,11 @@ func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
 				v.HAName, name = n, n
 			}
 			v.MatchesEntry = s.resolve(sc.TagID, name)
+			if v.MatchesEntry == "" && s.deps.Pools != nil {
+				if p, ok := s.deps.Pools.ByName(model.NormalizeName(name)); ok {
+					v.MatchesPool = p.ID
+				}
+			}
 		}
 		out = append(out, v)
 	}

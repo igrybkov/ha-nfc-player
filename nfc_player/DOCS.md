@@ -87,7 +87,8 @@ Content-Security-Policy and can only be framed by Home Assistant itself.
   below).
 - **Unknown scans**: recent scans that matched nothing, with **Create entry**.
   **Rename** sets the tag's name in Home Assistant, so a new tag gets a
-  real name before you create its entry.
+  real name before you create its entry. **Create pool** starts a pool
+  with the tag's name; pools match tags by name.
   **All recent scans** below it shows every scan, event and UI play with
   its result and error.
 - **Print**: make a label PDF (see below).

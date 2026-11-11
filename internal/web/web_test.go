@@ -672,6 +672,16 @@ func TestScans(t *testing.T) {
 	}
 	e.tags.tags = nil
 
+	// A name that plays a pool is not unknown either.
+	e.scans.Add(model.Scan{TagID: "z", TagName: "Party Mix", Result: model.ScanNoMatch})
+	if _, err := e.pools.Create(model.Pool{Name: "Party mix", Items: []model.PoolItem{{Media: "apple_music://album/1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
+	if got[0]["matches_pool"] != "party-mix" || got[0]["matches_entry"] != "" {
+		t.Fatalf("pool scan %+v", got[0])
+	}
+
 	// An event's description is not a tag name, even when it equals one.
 	e.scans.Add(model.Scan{Source: model.SourceUI, TagName: "Old", Media: "Old", Result: model.ScanNoMatch})
 	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
