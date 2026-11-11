@@ -1148,3 +1148,25 @@ func TestPoolArtworkAndLabel(t *testing.T) {
 	e.art.fail["pool:kitchen"] = true
 	wantJSONError(t, e.do(t, "GET", "/api/pools/kitchen/artwork", nil), http.StatusNotFound)
 }
+
+func TestPrintPools(t *testing.T) {
+	e := newEnv(t, false)
+	a := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1"})
+	sub := "Random"
+	if _, err := e.pools.Create(model.Pool{Name: "Kitchen", Items: []model.PoolItem{{Tag: a.ID}}, Label: model.LabelOverrides{Subtitle: &sub}}); err != nil {
+		t.Fatal(err)
+	}
+	w := e.do(t, "POST", "/api/print/pdf", printRequest{EntryIDs: []string{"pool:kitchen", a.ID, "pool:all"}, TemplateID: "avery-5260"})
+	wantStatus(t, w, http.StatusOK)
+	job := e.lbl.lastJob(t)
+	if len(job.Items) != 3 || job.Items[0].Title != "Kitchen" || job.Items[0].Subtitle != "Random" || job.Items[0].Art == nil {
+		t.Fatalf("pool item %+v", job.Items)
+	}
+	if job.Items[2].Title != "All tags" {
+		t.Fatalf("all pool item %+v", job.Items[2])
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="kitchen-`) {
+		t.Fatalf("disposition %q", cd)
+	}
+	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{"pool:nope"}, TemplateID: "avery-5260"}), http.StatusNotFound)
+}

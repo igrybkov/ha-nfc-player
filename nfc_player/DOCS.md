@@ -132,6 +132,10 @@ pools:
   Media is a music link, an `Artist — Album` name, or a name that Music
   Assistant searches for.
 - The pool `all` is built in. It holds every tag that plays a URL.
+- `label` (optional) sets `title`, `subtitle` and `artwork` for the pool's
+  printed label, as on a tag. Without `artwork`, the pool shows its first
+  item's art. Tags that play the pool and have no artwork of their own use
+  the pool's.
 - Settings, strongest first: the event, the pool, the tag, the defaults
   (no shuffle, repeat all, area volume, player order).
 
@@ -309,7 +313,9 @@ tap_action:
 
 ## Labels
 
-On **Print**, pick tags, copies, a template and a background. Click a slot
+On **Print**, pick tags and pools, copies, a template and a background.
+A pool's label shows the pool's name, so write a tag with that name and
+it plays the pool. Click a slot
 on the sheet to start there; used slots stay empty. **Generate PDF** opens
 the PDF; print it at 100% (no scaling).
 

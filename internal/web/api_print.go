@@ -18,6 +18,7 @@ import (
 
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
+	"github.com/igrybkov/ha-nfc-player/internal/pools"
 )
 
 // printRequest is the body of api/print/preview and api/print/pdf. The server
@@ -198,7 +199,7 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 
 	entries := make([]model.Entry, 0, len(req.EntryIDs))
 	for _, id := range req.EntryIDs {
-		e, err := s.deps.Registry.Get(id)
+		e, err := s.printEntry(id)
 		if err != nil {
 			return job, nil, err
 		}
@@ -241,6 +242,19 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 	job.OuterBleedMM = settings.Print.OuterBleed()
 	job.Outline = req.Outline
 	return job, entries, nil
+}
+
+// printEntry resolves one id of a print job: an entry id, or a pool as
+// pools.RefPrefix + its id. A pool prints under its own name and art.
+func (s *Server) printEntry(id string) (model.Entry, error) {
+	if pid, ok := strings.CutPrefix(id, pools.RefPrefix); ok {
+		p, found := s.deps.Pools.Pool(pid)
+		if !found {
+			return model.Entry{}, fmt.Errorf("%w: no pool %q", pools.ErrNotFound, pid)
+		}
+		return pools.AsEntry(p), nil
+	}
+	return s.deps.Registry.Get(id)
 }
 
 // items builds the labels: entries first, then sample placeholders. art is

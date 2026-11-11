@@ -1,16 +1,24 @@
 // Print screen: pick entries, set up the sheet, preview slots, open the PDF.
 import {
-  h, get, post, put, toast, run, highlight, thumb, searchList, field, num, readNum, select, openPDF,
+  h, get, post, put, toast, run, highlight, thumb, searchList, field, num, readNum, select, openPDF, poolEntry,
 } from './lib.js';
+import { ALL } from './pools.js';
 
 // Kept across visits so a half-done print setup survives a detour.
 // background '' = the default background from settings.
 const state = { selected: [], template: '', background: '', copies: 1, row: 1, col: 1, skip: 0 };
 
+// editLink opens the editor of a picked entry or pool ("pool:<id>").
+const editLink = (id) => (id.startsWith('pool:')
+  ? `#/pools/edit/${encodeURIComponent(id.slice(5))}`
+  : `#/tags/edit/${encodeURIComponent(id)}`);
+
 export async function render(view) {
-  const [entries, templates, backgrounds, settings] = await Promise.all([
-    get('api/tags'), get('api/templates'), get('api/backgrounds'), get('api/settings'),
+  const [tagEntries, { pools }, templates, backgrounds, settings] = await Promise.all([
+    get('api/tags'), get('api/pools'), get('api/templates'), get('api/backgrounds'), get('api/settings'),
   ]);
+  // Pools print too, under their own name: a tag with that name plays them.
+  const entries = [...tagEntries, ...[...pools, { ...ALL, items: [] }].map(poolEntry)];
   const byID = new Map(entries.map((e) => [e.id, e]));
   state.selected = state.selected.filter((id) => byID.has(id));
   if (!templates.some((t) => t.id === state.template)) state.template = templates[0]?.id ?? '';
@@ -36,7 +44,8 @@ export async function render(view) {
       h('input', { type: 'checkbox', checked: state.selected.includes(e.id), tabindex: -1, 'aria-hidden': 'true',
         onclick: (ev) => ev.preventDefault() }),
       thumb(e, 32),
-      h('div', { class: 'grow title' }, highlight(e.name, pos))),
+      h('div', { class: 'grow title' }, highlight(e.name, pos)),
+      e.isPool && h('span', { class: 'badge', text: 'pool' })),
     onEnter: toggle,
   });
 
@@ -109,7 +118,7 @@ export async function render(view) {
     missingBox.replaceChildren(h('span', {},
       h('strong', { text: `${n} entr${n === 1 ? 'y has' : 'ies have'} no art and will print without it: ` }),
       missing.map((m, i) => [i > 0 && ', ',
-        h('a', { href: `#/tags/edit/${encodeURIComponent(m.id)}`, text: m.name })])));
+        h('a', { href: editLink(m.id), text: m.name })])));
   };
   let timer = 0;
   let seq = 0;

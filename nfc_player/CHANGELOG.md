@@ -6,6 +6,11 @@
   then shows the new name, and **Create entry** starts with it.
 - **Unknown scans → Create pool** starts a pool named after the tag. A tag
   whose name plays a pool no longer shows as unknown.
+- Pools have a label (title, subtitle, artwork) and show their art. A pool
+  without artwork uses its first item's; pool tags without art use the
+  pool's.
+- **Print** lists pools next to tags. A pool label prints the pool's name,
+  so a tag written with that name plays the pool.
 
 ## 0.3.1
 
