@@ -39,7 +39,7 @@ func (d eventData) playCommand() (model.PlayCommand, error) {
 		dst *string
 	}{
 		{"area", &cmd.AreaID}, {"player", &cmd.Entity},
-		{"media", &cmd.Media}, {"tag", &cmd.Tag}, {"pool", &cmd.Pool},
+		{"media", &cmd.Media}, {"record", &cmd.Record}, {"tag", &cmd.Tag}, {"pool", &cmd.Pool},
 	}
 	for _, s := range strs {
 		if *s.dst, err = d.str(s.key); err != nil {

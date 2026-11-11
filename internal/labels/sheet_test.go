@@ -192,14 +192,14 @@ func TestTitleSubtitle(t *testing.T) {
 	}
 }
 
-func TestItemFromEntryOverrides(t *testing.T) {
+func TestItemFromSubjectOverrides(t *testing.T) {
 	str := func(s string) *string { return &s }
-	e := model.Entry{Name: "Queen — Bohemian Rhapsody"}
-	if it := ItemFromEntry(e, nil); it.Title != "Queen" || it.Subtitle != "Bohemian Rhapsody" {
+	e := model.Subject{Name: "Queen — Bohemian Rhapsody"}
+	if it := ItemFromSubject(e, nil); it.Title != "Queen" || it.Subtitle != "Bohemian Rhapsody" {
 		t.Errorf("no overrides: %+v", it)
 	}
 	e.Label = model.LabelOverrides{Title: str("QUEEN"), Subtitle: str("")}
-	if it := ItemFromEntry(e, nil); it.Title != "QUEEN" || it.Subtitle != "" {
+	if it := ItemFromSubject(e, nil); it.Title != "QUEEN" || it.Subtitle != "" {
 		t.Errorf("overrides: %+v", it)
 	}
 }

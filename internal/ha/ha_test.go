@@ -136,6 +136,12 @@ func (f *fakeHA) handle(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			ok(map[string]any{"id": "tag-1", "name": cmd["name"]})
+		case "tag/delete":
+			if cmd["tag_id"] != "tag-1" {
+				write(map[string]any{"id": id, "type": "result", "success": false, "error": map[string]any{"code": "not_found", "message": "Unable to find tag_id"}})
+				continue
+			}
+			ok(nil)
 		case "call_service":
 			f.mu.Lock()
 			serr := f.serviceErr
@@ -299,6 +305,32 @@ func TestRenameTag(t *testing.T) {
 		t.Fatalf("sent %v", sent)
 	}
 	if err := c.RenameTag(ctx, "nope", "x"); err == nil || !strings.Contains(err.Error(), "Unable to find") {
+		t.Fatalf("unknown tag: %v", err)
+	}
+}
+
+func TestDeleteTag(t *testing.T) {
+	f := newFakeHA(t)
+	c, _, _ := startClient(t, f, testToken)
+	ctx := testCtx(t)
+
+	if err := c.DeleteTag(ctx, "tag-1"); err != nil {
+		t.Fatal(err)
+	}
+	var sent map[string]any
+	f.mu.Lock()
+	for _, cmd := range f.commands {
+		if cmd["type"] == "tag/delete" {
+			sent = cmd
+		}
+	}
+	f.mu.Unlock()
+	if sent["tag_id"] != "tag-1" {
+		t.Fatalf("sent %v", sent)
+	}
+	err := c.DeleteTag(ctx, "nope")
+	var haErr *Error
+	if !errors.As(err, &haErr) || haErr.Code != "not_found" {
 		t.Fatalf("unknown tag: %v", err)
 	}
 }

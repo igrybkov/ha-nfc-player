@@ -1,24 +1,19 @@
-// Print screen: pick entries, set up the sheet, preview slots, open the PDF.
+// Print screen: pick records, set up the sheet, preview slots, open the PDF.
 import {
-  h, get, post, put, toast, run, highlight, thumb, searchList, field, num, readNum, select, openPDF, poolEntry,
+  h, get, post, put, toast, run, highlight, thumb, searchList, field, num, readNum, select, openPDF,
 } from './lib.js';
-import { ALL } from './pools.js';
 
 // Kept across visits so a half-done print setup survives a detour.
 // background '' = the default background from settings.
 const state = { selected: [], template: '', background: '', copies: 1, row: 1, col: 1, skip: 0 };
 
-// editLink opens the editor of a picked entry or pool ("pool:<id>").
-const editLink = (id) => (id.startsWith('pool:')
-  ? `#/pools/edit/${encodeURIComponent(id.slice(5))}`
-  : `#/tags/edit/${encodeURIComponent(id)}`);
+// editLink opens the editor of a picked record.
+const editLink = (id) => `#/records/edit/${encodeURIComponent(id)}`;
 
 export async function render(view) {
-  const [tagEntries, { pools }, templates, backgrounds, settings] = await Promise.all([
-    get('api/tags'), get('api/pools'), get('api/templates'), get('api/backgrounds'), get('api/settings'),
+  const [entries, templates, backgrounds, settings] = await Promise.all([
+    get('api/records'), get('api/templates'), get('api/backgrounds'), get('api/settings'),
   ]);
-  // Pools print too, under their own name: a tag with that name plays them.
-  const entries = [...tagEntries, ...[...pools, { ...ALL, items: [] }].map(poolEntry)];
   const byID = new Map(entries.map((e) => [e.id, e]));
   state.selected = state.selected.filter((id) => byID.has(id));
   if (!templates.some((t) => t.id === state.template)) state.template = templates[0]?.id ?? '';
@@ -28,7 +23,7 @@ export async function render(view) {
   }
   const tpl = () => templates.find((t) => t.id === state.template);
 
-  // Entry picker.
+  // Record picker.
   const toggle = (e) => {
     const i = state.selected.indexOf(e.id);
     if (i < 0) state.selected.push(e.id); else state.selected.splice(i, 1);
@@ -39,13 +34,12 @@ export async function render(view) {
   const sl = searchList({
     items: entries,
     text: (e) => e.name,
-    placeholder: 'Search entries (Enter toggles)',
+    placeholder: 'Search records (Enter toggles)',
     row: (e, pos) => h('div', { class: 'row' },
       h('input', { type: 'checkbox', checked: state.selected.includes(e.id), tabindex: -1, 'aria-hidden': 'true',
         onclick: (ev) => ev.preventDefault() }),
       thumb(e, 32),
-      h('div', { class: 'grow title' }, highlight(e.name, pos)),
-      e.isPool && h('span', { class: 'badge', text: 'pool' })),
+      h('div', { class: 'grow title' }, highlight(e.name, pos))),
     onEnter: toggle,
   });
 
@@ -93,7 +87,7 @@ export async function render(view) {
   }
 
   const job = (extra = {}) => ({
-    entry_ids: state.selected,
+    record_ids: state.selected,
     template_id: state.template,
     background_id: state.background,
     copies: Math.max(1, state.copies),
@@ -116,7 +110,7 @@ export async function render(view) {
     const n = missing.length;
     // Built through h(), which drops the false separator before the first link.
     missingBox.replaceChildren(h('span', {},
-      h('strong', { text: `${n} entr${n === 1 ? 'y has' : 'ies have'} no art and will print without it: ` }),
+      h('strong', { text: `${n} record${n === 1 ? ' has' : 's have'} no art and will print without it: ` }),
       missing.map((m, i) => [i > 0 && ', ',
         h('a', { href: editLink(m.id), text: m.name })])));
   };
@@ -142,7 +136,7 @@ export async function render(view) {
       // Nothing to print yet: show where printing would start.
       const start = (state.row - 1) * t.grid.cols + (state.col - 1);
       pages = [Array.from({ length: t.grid.cols * t.grid.rows }, (_, i) => (i < start ? 'used' : 'free'))];
-      summary.textContent = 'Pick entries to see where labels land.';
+      summary.textContent = 'Pick records to see where labels land.';
       showMissing([]);
     } else {
       try {
@@ -157,9 +151,9 @@ export async function render(view) {
         return;
       }
     }
-    // Copies of an entry print next to each other, so the n-th printed
+    // Copies of a record print next to each other, so the n-th printed
     // slot holds selected[n / copies].
-    const perEntry = Math.max(1, state.copies);
+    const perRecord = Math.max(1, state.copies);
     let printed = 0;
     // Detach the old slots first so their thumbnails can be reused.
     sheet.replaceChildren();
@@ -170,7 +164,7 @@ export async function render(view) {
           const row = Math.floor(i / t.grid.cols) + 1;
           const col = (i % t.grid.cols) + 1;
           const isStart = p === 0 && row === state.row && col === state.col;
-          const e = st === 'printed' ? byID.get(state.selected[Math.floor(printed++ / perEntry)]) : null;
+          const e = st === 'printed' ? byID.get(state.selected[Math.floor(printed++ / perRecord)]) : null;
           const where = `Row ${row}, column ${col}`;
           return h('button', {
             type: 'button',
@@ -184,7 +178,7 @@ export async function render(view) {
   }
 
   const generate = h('button', { type: 'button', class: 'primary', text: 'Generate PDF', onclick: () => {
-    if (!state.selected.length) { toast('Pick at least one entry.', 'error'); return; }
+    if (!state.selected.length) { toast('Pick at least one record.', 'error'); return; }
     openPDF(job());
   } });
   const saveOffsets = h('button', { type: 'button', text: 'Save offsets', onclick: (ev) => run(ev.currentTarget, async () => {

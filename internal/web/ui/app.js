@@ -1,23 +1,22 @@
 // Entry point: hash router. Each screen module exports
 // render(view, params) and may return a cleanup function.
+import * as records from './records.js';
 import * as tags from './tags.js';
-import * as pools from './pools.js';
-import * as scans from './scans.js';
 import * as print from './print.js';
 import * as templates from './templates.js';
 import * as backgrounds from './backgrounds.js';
 import * as settings from './settings.js';
 import { h } from './lib.js';
 
-const screens = { tags, pools, scans, print, templates, backgrounds, settings };
+const screens = { records, tags, print, templates, backgrounds, settings };
 let cleanup = null;
 let seq = 0;
 
-// parseHash turns "#/tags/edit?name=x" into {screen, rest, params}.
+// parseHash turns "#/records/edit/x?name=y" into {screen, rest, params}.
 function parseHash() {
   const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
   const [screen, ...rest] = path.split('/').map(decodeURIComponent);
-  return { screen: screen || 'tags', rest, params: new URLSearchParams(query) };
+  return { screen: screen || 'records', rest, params: new URLSearchParams(query) };
 }
 
 // route renders the screen for the hash. Each route gets its own container,
@@ -27,7 +26,7 @@ function parseHash() {
 async function route() {
   const my = ++seq;
   const { screen, rest, params } = parseHash();
-  const mod = screens[screen] || tags;
+  const mod = screens[screen] || records;
   if (cleanup) cleanup();
   cleanup = null;
   for (const a of document.querySelectorAll('#nav a')) {

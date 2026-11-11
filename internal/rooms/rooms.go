@@ -241,13 +241,3 @@ func (r *Resolver) DeviceArea(ctx context.Context, deviceID string, integrations
 	}
 	return areaID, allowed, nil
 }
-
-// Volume picks the volume: entry override, else area volume. The result is
-// clamped to 0..100 percent.
-func Volume(e model.Entry, a Area) int {
-	v := a.Volume
-	if e.Volume != nil {
-		v = *e.Volume
-	}
-	return min(max(v, 0), 100)
-}

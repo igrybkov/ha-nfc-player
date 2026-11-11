@@ -1,0 +1,8 @@
+version: 2
+backgrounds:
+  - id: navy
+    name: Navy
+    background: "#000080"
+    text: "#FFFFFF"
+    fade: "#000000"
+    fade_text: "#FFFFFF"

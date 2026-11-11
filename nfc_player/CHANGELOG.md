@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0
+
+- **Records** replace tags and pools. A record is a tag name and what it
+  plays: one or more items, each a music link or name, another record, or
+  all other records. A play picks an item at random, then goes down into
+  it, so every artist in a mix gets a fair share.
+- Shuffle per kind of media: albums play in order by default; artists,
+  playlists and the rest shuffle. Four checkboxes per record.
+- The **Tags** screen lists every Home Assistant tag with the record it
+  plays. Rename, delete or create a record from there. It replaces Unknown
+  scans.
+- Files carry a schema version and older ones convert on read.
+  `tags.yaml` and `pools.yaml` become `records.yaml`; templates and
+  backgrounds files get a version. Nothing is written until you save;
+  that save writes every file in the new format.
+- Linked tag ids are gone: records match tags by name. Play events with
+  `tag:` or `pool:` still work, and `record:` is the new key.
+
 ## 0.3.2
 
 - **Unknown scans → Rename** renames the tag in Home Assistant. The row

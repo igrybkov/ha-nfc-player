@@ -3,7 +3,6 @@ package migrate
 import (
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -305,11 +304,9 @@ func normalize(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-var idRe = regexp.MustCompile(`^[a-z0-9-]+$`)
-
 // unique returns id, or id-2, id-3 … when taken, and marks it used.
 func unique(id string, used map[string]bool) string {
-	if !idRe.MatchString(id) {
+	if id == "" {
 		id = "record"
 	}
 	out := id

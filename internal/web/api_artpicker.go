@@ -11,14 +11,14 @@ import (
 
 	"github.com/igrybkov/ha-nfc-player/internal/artwork"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
-	"github.com/igrybkov/ha-nfc-player/internal/pools"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 )
 
 // ArtPicker finds the images the art picker offers. *artwork.Cache
 // satisfies it.
 type ArtPicker interface {
-	Candidates(ctx context.Context, e model.Entry, offset, limit int) (artwork.CandidatePage, error)
-	SourceURL(ctx context.Context, e model.Entry) (string, error)
+	Candidates(ctx context.Context, s model.Subject, offset, limit int) (artwork.CandidatePage, error)
+	SourceURL(ctx context.Context, s model.Subject) (string, error)
 	Preview(ctx context.Context, u string) (image.Image, error)
 }
 
@@ -28,8 +28,8 @@ const pickerTimeout = 25 * time.Second
 // pickerPage is how many linked items one candidates request looks up.
 const pickerPage = 12
 
-// maxPoolCandidates caps how many pool items the picker looks up.
-const maxPoolCandidates = 100
+// maxItemCandidates caps how many record items the picker looks up.
+const maxItemCandidates = 100
 
 // pickerItem is a candidate plus the URL the UI shows it with.
 type pickerItem struct {
@@ -49,8 +49,11 @@ func previewPath(u string) string {
 	return "api/artwork/preview?url=" + url.QueryEscape(u)
 }
 
-func (s *Server) tagArtCandidates(w http.ResponseWriter, r *http.Request) {
-	e, err := s.deps.Registry.Get(r.PathValue("id"))
+// recordArtCandidates offers art for a record. A record of one media link
+// gets that link's cover and linked items, paged. Any other record gets
+// the art of each of its items on one page.
+func (s *Server) recordArtCandidates(w http.ResponseWriter, r *http.Request) {
+	rec, err := s.deps.Records.Get(r.PathValue("id"))
 	if err != nil {
 		s.writeErr(w, r, err)
 		return
@@ -64,16 +67,17 @@ func (s *Server) tagArtCandidates(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), pickerTimeout)
 	defer cancel()
-	if e.Pool != "" {
-		p, ok := s.deps.Pools.Pool(e.Pool)
-		if !ok || offset > 0 {
+	if len(rec.Items) != 1 || !records.IsURL(rec.Items[0].Media) {
+		if offset > 0 {
 			writeJSON(w, http.StatusOK, pickerPageResponse{Items: []pickerItem{}, Next: -1})
 			return
 		}
-		writeJSON(w, http.StatusOK, pickerPageResponse{Items: s.poolCandidates(ctx, p), Next: -1})
+		writeJSON(w, http.StatusOK, pickerPageResponse{Items: s.itemCandidates(ctx, rec), Next: -1})
 		return
 	}
-	page, err := s.deps.ArtPicker.Candidates(ctx, e, offset, pickerPage)
+	// The record name keys the art index, as the record's own art does.
+	sub := model.Subject{ID: rec.ID, Name: rec.Name, URL: rec.Items[0].Media}
+	page, err := s.deps.ArtPicker.Candidates(ctx, sub, offset, pickerPage)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "art lookup: "+err.Error())
 		return
@@ -85,37 +89,30 @@ func (s *Server) tagArtCandidates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) poolArtCandidates(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.deps.Pools.Pool(r.PathValue("id"))
-	if !ok {
-		writeError(w, http.StatusNotFound, "no pool "+r.PathValue("id"))
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), pickerTimeout)
-	defer cancel()
-	writeJSON(w, http.StatusOK, pickerPageResponse{Items: s.poolCandidates(ctx, p), Next: -1})
-}
-
-// poolCandidates offers the art of each pool item, in item order. A tag
-// item with an artwork file shows through its tag's art route, so the
-// preview proxy never reads files. Items without art are left out.
-func (s *Server) poolCandidates(ctx context.Context, p model.Pool) []pickerItem {
-	items := p.Items
-	if len(items) > maxPoolCandidates {
-		items = items[:maxPoolCandidates]
+// itemCandidates offers the art of each item of rec, in item order. A
+// record item whose art is a file shows through that record's art route,
+// so the preview proxy never reads files. Names, "others" and items
+// without art are left out.
+func (s *Server) itemCandidates(ctx context.Context, rec model.Record) []pickerItem {
+	items := rec.Items
+	if len(items) > maxItemCandidates {
+		items = items[:maxItemCandidates]
 	}
 	found := make([]pickerItem, len(items))
 	sem := make(chan struct{}, artParallel)
 	var wg sync.WaitGroup
 	for i, it := range items {
-		e := model.Entry{Name: it.Media, URL: it.Media}
-		if it.Tag != "" {
-			te, err := s.deps.Registry.Get(it.Tag)
+		var sub model.Subject
+		switch {
+		case it.Record != "":
+			sr, err := s.deps.Records.Get(it.Record)
 			if err != nil {
 				continue
 			}
-			e = te
-		} else if !pools.IsURL(it.Media) {
+			sub = s.deps.Records.Subject(sr)
+		case records.IsURL(it.Media):
+			sub = model.Subject{Name: it.Media, URL: it.Media}
+		default:
 			continue // a name to search for has no art of its own
 		}
 		wg.Add(1)
@@ -125,16 +122,20 @@ func (s *Server) poolCandidates(ctx context.Context, p model.Pool) []pickerItem 
 			defer func() { <-sem }()
 			actx, cancel := context.WithTimeout(ctx, artworkTimeout)
 			defer cancel()
-			u, err := s.deps.ArtPicker.SourceURL(actx, e)
+			u, err := s.deps.ArtPicker.SourceURL(actx, sub)
 			if err != nil {
-				s.log.Debug("web: no art for pool item", "pool", p.ID, "item", e.Name, "err", err)
+				s.log.Debug("web: no art for record item", "record", rec.ID, "item", sub.Name, "err", err)
 				return
 			}
 			preview := previewPath(u)
-			if !isHTTPURL(u) {
-				preview = "api/tags/" + url.PathEscape(e.ID) + "/artwork"
+			switch {
+			case isHTTPURL(u):
+			case sub.ID != "":
+				preview = "api/records/" + url.PathEscape(sub.ID) + "/artwork"
+			default:
+				preview = "api/artwork/media?url=" + url.QueryEscape(sub.URL)
 			}
-			found[i] = pickerItem{Candidate: artwork.Candidate{URL: u, Label: e.Name, Kind: "item"}, Preview: preview}
+			found[i] = pickerItem{Candidate: artwork.Candidate{URL: u, Label: sub.Name, Kind: "item"}, Preview: preview}
 		}()
 	}
 	wg.Wait()

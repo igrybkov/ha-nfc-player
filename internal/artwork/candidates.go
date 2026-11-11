@@ -15,7 +15,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 )
 
-// Candidate is one image the art picker offers for an entry.
+// Candidate is one image the art picker offers for a subject.
 type Candidate struct {
 	URL   string `json:"url"`   // stored as label.artwork when picked
 	Label string `json:"label"` // what it shows: "Cover", an artist or album name
@@ -69,18 +69,18 @@ type linkResult struct {
 	cand Candidate // empty URL: the link had no image
 }
 
-// Candidates returns a page of images for e. The first page starts with
-// e's own art (the lookup the chain would do, without the label override).
+// Candidates returns a page of images for sub. The first page starts with
+// sub's own art (the lookup the chain would do, without the label override).
 // For an Apple Music link the rest are the artists, albums and playlists
 // linked from its page, limit at a time from offset. They are best effort:
 // a page that fails is logged and left out, and an image already offered
 // is not offered again. Spotify media gets its own art only, since oEmbed
 // links nothing. Pages and linked items are kept for an hour.
-func (c *Cache) Candidates(ctx context.Context, e model.Entry, offset, limit int) (CandidatePage, error) {
-	e.Label.Artwork = nil
+func (c *Cache) Candidates(ctx context.Context, sub model.Subject, offset, limit int) (CandidatePage, error) {
+	sub.Label.Artwork = nil
 	page := CandidatePage{Items: []Candidate{}, Next: -1}
 	own := ""
-	if u, err := c.SourceURL(ctx, e); err == nil {
+	if u, err := c.SourceURL(ctx, sub); err == nil {
 		own = u
 		if offset == 0 {
 			page.Items = append(page.Items, Candidate{URL: u, Label: "Cover", Kind: KindCover})
@@ -88,16 +88,16 @@ func (c *Cache) Candidates(ctx context.Context, e model.Entry, offset, limit int
 	} else if ctx.Err() != nil {
 		return page, ctx.Err()
 	} else {
-		c.logger().Info("art picker: no cover", "name", e.Name, "error", err)
+		c.logger().Info("art picker: no cover", "name", sub.Name, "error", err)
 	}
 	// Not catalog.Parse alone: it rejects hosts other than Apple's, which
 	// tests use. The fetch checks the host against AllowHost anyway.
-	if m, perr := catalog.Parse(e.URL); !isHTTP(e.URL) || (perr == nil && m.IsSpotify()) {
+	if m, perr := catalog.Parse(sub.URL); !isHTTP(sub.URL) || (perr == nil && m.IsSpotify()) {
 		return page, nil
 	}
-	links, err := c.pageLinks(ctx, e.URL)
+	links, err := c.pageLinks(ctx, sub.URL)
 	if err != nil {
-		c.logger().Warn("art picker: page links", "url", e.URL, "error", err)
+		c.logger().Warn("art picker: page links", "url", sub.URL, "error", err)
 		return page, nil
 	}
 	if offset >= len(links) {
@@ -117,13 +117,13 @@ func (c *Cache) Candidates(ctx context.Context, e model.Entry, offset, limit int
 	return page, ctx.Err()
 }
 
-// SourceURL returns the URL or path e's art comes from: the label
+// SourceURL returns the URL or path sub's art comes from: the label
 // override, the index, or the lookup chain (recorded in the index).
-func (c *Cache) SourceURL(ctx context.Context, e model.Entry) (string, error) {
-	if override := overrideOf(e); override != "" {
+func (c *Cache) SourceURL(ctx context.Context, sub model.Subject) (string, error) {
+	if override := overrideOf(sub); override != "" {
 		return override, nil
 	}
-	key := e.Name + "\n" + e.URL
+	key := sub.Name + "\n" + sub.URL
 	index, err := c.readIndex()
 	if err != nil {
 		c.logger().Warn("artwork index unreadable; resolving again", "error", err)
@@ -131,7 +131,7 @@ func (c *Cache) SourceURL(ctx context.Context, e model.Entry) (string, error) {
 	if u := index[key]; u != "" {
 		return u, nil
 	}
-	return c.resolveKey(ctx, e, key, false)
+	return c.resolveKey(ctx, sub, key, false)
 }
 
 // pageLinks returns the ranked links of an Apple Music page, cached.

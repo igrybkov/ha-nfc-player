@@ -95,37 +95,22 @@ export function splitName(name) {
 // normalizeName mirrors model.NormalizeName.
 export const normalizeName = (n) => n.split('|')[0].trim().toLowerCase();
 
-// artBumps holds, per entry id, when "Refresh art" last loaded new art.
+// artBumps holds, per record id, when "Refresh art" last loaded new art.
 const artBumps = new Map();
 
-// bumpArt marks an entry's art as changed. Browsers reuse an image URL the
+// bumpArt marks a record's art as changed. Browsers reuse an image URL the
 // page already loaded without asking the server, so the next artURL for the
-// entry must differ. After a reload, the server's ETag catches the change.
+// record must differ. After a reload, the server's ETag catches the change.
 export function bumpArt(id) {
   artBumps.set(id, Date.now());
 }
 
-// artURL changes when the art source (url, pool, override) or a refresh
-// changes it. A pool entry's art comes from the pool's first item, so pool
-// saves bump it too (see pools.js).
-export function artURL(entry, size) {
-  const src = entry.artKey ?? `${entry.url}|${entry.label?.artwork ?? ''}`;
-  const v = hash(entry.pool ? `${src}|${entry.pool}` : src);
-  const bump = artBumps.get(entry.id);
-  const base = entry.artPath ?? `api/tags/${encodeURIComponent(entry.id)}/artwork`;
-  return `${base}?size=${size}&v=${v}${bump ? `&r=${bump}` : ''}`;
-}
-
-// poolEntry shows a pool where an entry is expected: in thumbnails, and in
-// the print picker. Its id is the print ref ("pool:<id>"); its art comes
-// from the pool's artwork route and changes with its override or items.
-export function poolEntry(p) {
-  return {
-    id: `pool:${p.id}`, name: p.name, url: '', pool: p.id, isPool: true,
-    label: p.label ?? { title: null, subtitle: null, artwork: null },
-    artPath: `api/pools/${encodeURIComponent(p.id)}/artwork`,
-    artKey: JSON.stringify([p.label?.artwork ?? '', p.items ?? []]),
-  };
+// artURL changes when the art source (override, items) or a refresh changes
+// it. A record's art can come from its items, so item edits change the URL.
+export function artURL(record, size) {
+  const v = hash(JSON.stringify([record.label?.artwork ?? '', record.items ?? []]));
+  const bump = artBumps.get(record.id);
+  return `api/records/${encodeURIComponent(record.id)}/artwork?size=${size}&v=${v}${bump ? `&r=${bump}` : ''}`;
 }
 
 function hash(s) {
@@ -137,12 +122,12 @@ function hash(s) {
 // Thumbnails are reused by URL, so a list re-render (search, selection)
 // moves the loaded image instead of fetching it again. A node that is on the
 // page, or already handed out in this render, is never reused: two copies
-// of one entry (print copies, a tag twice in a pool) get two elements.
+// of one record (print copies, a record twice in a list) get two elements.
 const thumbs = new Map(); // src → img[]
 const claimed = new Set(); // handed out since the current task began
 
-export function thumb(entry, size = 48) {
-  const src = artURL(entry, size * 2);
+export function thumb(record, size = 48) {
+  const src = artURL(record, size * 2);
   if (!claimed.size) queueMicrotask(() => claimed.clear());
   const pool = thumbs.get(src) ?? [];
   let img = pool.find((n) => !n.isConnected && !claimed.has(n));
@@ -289,7 +274,7 @@ export function openPDF(job) {
 export const sized = (preview, size) => `${preview}${preview.includes('?') ? '&' : '?'}size=${size}`;
 
 // artPicker offers images for an artwork field: the media's cover, then
-// the artists, albums and playlists its page links to, or a pool's item
+// the artists, albums and playlists its page links to, or a record's item
 // art. More load as the grid scrolls into view; an image already shown is
 // not shown again. A pick fills input with the image URL and calls onPick
 // with a preview URL; "Automatic" clears the input. Nothing saves until

@@ -47,7 +47,7 @@ func TestV1ToV2(t *testing.T) {
 	if got != string(want) {
 		t.Errorf("records.yaml differs from the golden file; run with UPDATE_GOLDEN=1 and review the diff\n%s", got)
 	}
-	if tpl := load(t, set, "templates.yaml"); !strings.HasPrefix(tpl, "version: 2\ntemplates:\n  - id: avery") {
+	if tpl := load(t, set, "templates.yaml"); !strings.HasPrefix(tpl, "version: 2\ntemplates:\n") || !strings.Contains(tpl, "- id: avery") {
 		t.Errorf("templates.yaml = %q", tpl)
 	}
 }

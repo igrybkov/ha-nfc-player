@@ -222,25 +222,6 @@ func TestDeviceArea(t *testing.T) {
 	}
 }
 
-func TestVolume(t *testing.T) {
-	a := Area{Volume: 30}
-	tests := []struct {
-		entry *int
-		want  int
-	}{
-		{nil, 30},
-		{ptr(50), 50},
-		{ptr(0), 0},
-		{ptr(150), 100},
-		{ptr(-5), 0},
-	}
-	for _, tt := range tests {
-		if got := Volume(model.Entry{Volume: tt.entry}, a); got != tt.want {
-			t.Errorf("Volume(entry=%v) = %d, want %d", tt.entry, got, tt.want)
-		}
-	}
-}
-
 func removeEntity(list []ha.Entity, id string) []ha.Entity {
 	var out []ha.Entity
 	for _, e := range list {

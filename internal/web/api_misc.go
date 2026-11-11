@@ -13,12 +13,12 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 )
 
-// haTag is an HA tag with the registry entry it resolves to, if any.
+// haTag is an HA tag with the record its name plays, if any.
 type haTag struct {
 	ID          string     `json:"id"`
 	Name        string     `json:"name"`
 	LastScanned *time.Time `json:"last_scanned"`
-	EntryID     string     `json:"entry_id"` // empty = not linked
+	RecordID    string     `json:"record_id"` // empty = no record
 }
 
 func (s *Server) haTags(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +32,7 @@ func (s *Server) haTags(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]haTag, 0, len(tags))
 	for _, t := range tags {
-		out = append(out, haTag{ID: t.ID, Name: t.Name, LastScanned: t.LastScanned, EntryID: s.resolve(t.ID, t.Name)})
+		out = append(out, haTag{ID: t.ID, Name: t.Name, LastScanned: t.LastScanned, RecordID: s.recordFor(t.Name)})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -40,8 +40,8 @@ func (s *Server) haTags(w http.ResponseWriter, r *http.Request) {
 // maxTagName caps a new HA tag name. HA sets no limit; this only stops junk.
 const maxTagName = 200
 
-// renameHATag renames an HA tag, so a new tag can get its name from the
-// Unknown scans screen. It returns the tag as haTags lists it.
+// renameHATag renames an HA tag, so a new tag can get a record's name from
+// the Tags screen. It returns the tag as haTags lists it.
 func (s *Server) renameHATag(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
@@ -59,26 +59,43 @@ func (s *Server) renameHATag(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), haTimeout)
 	defer cancel()
 	if err := s.deps.HATags.RenameTag(ctx, id, name); err != nil {
-		var haErr *ha.Error
-		if errors.As(err, &haErr) && haErr.Code == "not_found" {
-			writeError(w, http.StatusNotFound, "Home Assistant has no tag "+id)
-			return
-		}
-		s.log.Warn("web: rename HA tag", "tag_id", id, "err", err)
-		writeError(w, http.StatusBadGateway, "Home Assistant: "+err.Error())
+		s.writeHATagErr(w, "rename", id, err)
 		return
 	}
 	s.log.Info("web: renamed HA tag", "tag_id", id, "name", name)
-	writeJSON(w, http.StatusOK, haTag{ID: id, Name: name, EntryID: s.resolve(id, name)})
+	writeJSON(w, http.StatusOK, haTag{ID: id, Name: name, RecordID: s.recordFor(name)})
 }
 
-// resolve mirrors the scan matching order: tag id, then normalized name.
-func (s *Server) resolve(tagID, name string) string {
-	if e, ok := s.deps.Registry.ByTagID(tagID); ok {
-		return e.ID
+// deleteHATag removes a tag from HA, for tags that were lost or rewritten.
+func (s *Server) deleteHATag(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ctx, cancel := context.WithTimeout(r.Context(), haTimeout)
+	defer cancel()
+	if err := s.deps.HATags.DeleteTag(ctx, id); err != nil {
+		s.writeHATagErr(w, "delete", id, err)
+		return
 	}
-	if e, ok := s.deps.Registry.ByName(model.NormalizeName(name)); ok {
-		return e.ID
+	s.log.Info("web: deleted HA tag", "tag_id", id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeHATagErr maps an HA tag command error: HA's not_found is a 404, the
+// rest is HA failing.
+func (s *Server) writeHATagErr(w http.ResponseWriter, what, id string, err error) {
+	var haErr *ha.Error
+	if errors.As(err, &haErr) && haErr.Code == "not_found" {
+		writeError(w, http.StatusNotFound, "Home Assistant has no tag "+id)
+		return
+	}
+	s.log.Warn("web: "+what+" HA tag", "tag_id", id, "err", err)
+	writeError(w, http.StatusBadGateway, "Home Assistant: "+err.Error())
+}
+
+// recordFor is the id of the record a tag name plays, as a scan matches
+// it; "" when none.
+func (s *Server) recordFor(name string) string {
+	if rec, ok := s.deps.Records.ByName(model.NormalizeName(name)); ok {
+		return rec.ID
 	}
 	return ""
 }
@@ -98,16 +115,15 @@ func (s *Server) haAreas(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, areas)
 }
 
-// scanView is a scan plus the entry it resolves to now. An unknown scan
-// stops being unknown once an entry for it exists. Only tag scans resolve:
+// scanView is a scan plus the record its tag plays now. An unknown scan
+// stops being unknown once a record for it exists. Only tag scans resolve:
 // for events and UI commands TagName is a description, not an HA tag name.
 // HAName is the tag's name in HA now, which differs from TagName after a
 // rename; it is empty when HA is unreachable.
 type scanView struct {
 	model.Scan
-	HAName       string `json:"ha_name,omitempty"`
-	MatchesEntry string `json:"matches_entry"`
-	MatchesPool  string `json:"matches_pool"` // pool id the name plays, when no entry matches
+	HAName        string `json:"ha_name,omitempty"`
+	MatchesRecord string `json:"matches_record"`
 }
 
 func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
@@ -121,12 +137,7 @@ func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
 			if n, ok := names[sc.TagID]; ok {
 				v.HAName, name = n, n
 			}
-			v.MatchesEntry = s.resolve(sc.TagID, name)
-			if v.MatchesEntry == "" && s.deps.Pools != nil {
-				if p, ok := s.deps.Pools.ByName(model.NormalizeName(name)); ok {
-					v.MatchesPool = p.ID
-				}
-			}
+			v.MatchesRecord = s.recordFor(name)
 		}
 		out = append(out, v)
 	}

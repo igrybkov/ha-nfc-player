@@ -48,15 +48,15 @@ func TitleSubtitle(name string) (title, subtitle string) {
 	return strings.TrimSpace(title), strings.TrimSpace(subtitle)
 }
 
-// ItemFromEntry builds the label for an entry: title and subtitle from the
-// name, replaced by the entry's label overrides when set.
-func ItemFromEntry(e model.Entry, art image.Image) Item {
-	title, subtitle := TitleSubtitle(e.Name)
-	if e.Label.Title != nil {
-		title = *e.Label.Title
+// ItemFromSubject builds the label for a subject: title and subtitle from
+// the name, replaced by the subject's label overrides when set.
+func ItemFromSubject(s model.Subject, art image.Image) Item {
+	title, subtitle := TitleSubtitle(s.Name)
+	if s.Label.Title != nil {
+		title = *s.Label.Title
 	}
-	if e.Label.Subtitle != nil {
-		subtitle = *e.Label.Subtitle
+	if s.Label.Subtitle != nil {
+		subtitle = *s.Label.Subtitle
 	}
 	return Item{Title: title, Subtitle: subtitle, Art: art}
 }

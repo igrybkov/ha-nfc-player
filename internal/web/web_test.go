@@ -26,8 +26,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
-	"github.com/igrybkov/ha-nfc-player/internal/pools"
-	"github.com/igrybkov/ha-nfc-player/internal/registry"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/rooms"
 	"github.com/igrybkov/ha-nfc-player/internal/scan"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
@@ -37,7 +36,7 @@ import (
 
 type fakePlay struct {
 	mu     sync.Mutex
-	played []string // entry id @ area
+	played []string // record id @ area
 	cmds   []model.PlayCommand
 	stops  []model.Target
 	err    error
@@ -45,13 +44,13 @@ type fakePlay struct {
 	areas  []model.AreaInfo
 }
 
-func (f *fakePlay) PlayEntry(_ context.Context, e model.Entry, areaID string) (string, error) {
+func (f *fakePlay) PlayRecord(_ context.Context, id, areaID string) (string, error) {
 	if f.panic {
 		panic("boom")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.played = append(f.played, e.ID+"@"+areaID)
+	f.played = append(f.played, id+"@"+areaID)
 	return "sonos", f.err
 }
 
@@ -62,7 +61,7 @@ func (f *fakePlay) Play(_ context.Context, cmd model.PlayCommand) (model.PlayRes
 	if f.err != nil {
 		return model.PlayResult{}, f.err
 	}
-	return model.PlayResult{Player: "music_assistant", PoolID: cmd.Pool, Media: cmd.Media}, nil
+	return model.PlayResult{Player: "music_assistant", RecordID: cmd.Record, Media: cmd.Media}, nil
 }
 
 func (f *fakePlay) Stop(_ context.Context, t model.Target) (string, error) {
@@ -84,22 +83,32 @@ type fakeScans struct{ scans []model.Scan }
 func (f *fakeScans) Add(s model.Scan)     { f.scans = append([]model.Scan{s}, f.scans...) }
 func (f *fakeScans) Recent() []model.Scan { return f.scans }
 
+// fakeArt keys subjects by id, or by URL for a bare media link.
 type fakeArt struct {
 	mu       sync.Mutex
-	fail     map[string]bool // entry id → error
-	calls    []string
+	fail     map[string]bool // subject key → error
+	calls    []string        // subject keys
+	subs     []model.Subject
 	refreshs int
 	shade    uint8 // pixel value; 0 = 200
 }
 
-func (f *fakeArt) Artwork(_ context.Context, e model.Entry, refresh bool) (image.Image, error) {
+func artKey(s model.Subject) string {
+	if s.ID != "" {
+		return s.ID
+	}
+	return s.URL
+}
+
+func (f *fakeArt) Artwork(_ context.Context, s model.Subject, refresh bool) (image.Image, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, e.ID)
+	f.calls = append(f.calls, artKey(s))
+	f.subs = append(f.subs, s)
 	if refresh {
 		f.refreshs++
 	}
-	if f.fail[e.ID] {
+	if f.fail[artKey(s)] {
 		return nil, errors.New("no art")
 	}
 	shade := f.shade
@@ -112,6 +121,16 @@ func (f *fakeArt) Artwork(_ context.Context, e model.Entry, refresh bool) (image
 	}
 	img.Set(0, 0, color.RGBA{255, 0, 0, 255})
 	return img, nil
+}
+
+func (f *fakeArt) lastSubject(t *testing.T) model.Subject {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.subs) == 0 {
+		t.Fatal("no artwork asked for")
+	}
+	return f.subs[len(f.subs)-1]
 }
 
 type fakeTags struct {
@@ -128,6 +147,19 @@ func (f *fakeTags) RenameTag(_ context.Context, id, name string) error {
 	for i := range f.tags {
 		if f.tags[i].ID == id {
 			f.tags[i].Name = name
+			return nil
+		}
+	}
+	return &ha.Error{Code: "not_found", Message: "Unable to find tag_id"}
+}
+
+func (f *fakeTags) DeleteTag(_ context.Context, id string) error {
+	if f.err != nil {
+		return f.err
+	}
+	for i := range f.tags {
+		if f.tags[i].ID == id {
+			f.tags = append(f.tags[:i], f.tags[i+1:]...)
 			return nil
 		}
 	}
@@ -210,8 +242,7 @@ func (f *fakeLabels) lastJob(t *testing.T) labels.Job {
 
 type testEnv struct {
 	h        http.Handler
-	reg      *registry.Registry
-	pools    *pools.Store
+	recs     *records.Store
 	picker   *fakePicker
 	settings *config.SettingsStore
 	play     *fakePlay
@@ -225,27 +256,26 @@ func newEnv(t *testing.T, supervisor bool) *testEnv {
 	t.Helper()
 	registerLayout.Do(func() { labels.RegisterLayout(fakeLayout{}) })
 	dir := t.TempDir()
-	tpls, err := config.NewTemplateStore(store.Open(filepath.Join(dir, config.TemplatesFile), func() []labels.Template { return []labels.Template{} }))
+	tpls, err := config.NewTemplateStore(store.Open(filepath.Join(dir, config.TemplatesFileName), config.DefaultTemplatesFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	bgs, err := config.NewBackgroundStore(store.Open(filepath.Join(dir, config.BackgroundsFile), func() []labels.Background { return []labels.Background{} }))
+	bgs, err := config.NewBackgroundStore(store.Open(filepath.Join(dir, config.BackgroundsFileName), config.DefaultBackgroundsFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	e := &testEnv{
-		reg:      registry.New(store.Open(filepath.Join(dir, config.TagsFile), registry.DefaultTagsFile)),
-		settings: config.NewSettingsStore(store.Open(filepath.Join(dir, config.SettingsFile), model.DefaultSettings)),
+		recs:     records.New(store.Open(filepath.Join(dir, records.FileName), records.DefaultFile)),
+		settings: config.NewSettingsStore(store.Open(filepath.Join(dir, config.SettingsFileName), model.DefaultSettings)),
 		play:     &fakePlay{areas: []model.AreaInfo{{ID: "office", Name: "Office", SonosEntity: "media_player.office", Volume: 15}}},
 		scans:    &fakeScans{},
 		art:      &fakeArt{fail: map[string]bool{}},
 		tags:     &fakeTags{},
 		lbl:      &fakeLabels{},
+		picker:   &fakePicker{},
 	}
-	e.pools = pools.New(store.Open(filepath.Join(dir, config.PoolsFile), pools.DefaultFile), e.reg)
-	e.picker = &fakePicker{}
 	e.h = New(Deps{
-		Registry: e.reg, Pools: e.pools, Settings: e.settings, Templates: tpls, Backgrounds: bgs,
+		Records: e.recs, Settings: e.settings, Templates: tpls, Backgrounds: bgs,
 		Play: e.play, Scans: e.scans, Artwork: e.art, HATags: e.tags, Labels: e.lbl, ArtPicker: e.picker,
 		Supervisor: supervisor,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -311,9 +341,18 @@ func wantJSONError(t *testing.T, w *httptest.ResponseRecorder, code int) {
 	}
 }
 
-func (e *testEnv) mustCreate(t *testing.T, entry model.Entry) model.Entry {
+// media is the record items for media texts.
+func media(m ...string) []model.RecordItem {
+	var out []model.RecordItem
+	for _, x := range m {
+		out = append(out, model.RecordItem{Media: x})
+	}
+	return out
+}
+
+func (e *testEnv) mustCreate(t *testing.T, r model.Record) model.Record {
 	t.Helper()
-	got, err := e.reg.Create(entry)
+	got, err := e.recs.Create(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,149 +366,108 @@ func TestHealthz(t *testing.T) {
 	wantStatus(t, e.do(t, "GET", "/healthz", nil), http.StatusOK)
 }
 
-func TestTagsCRUD(t *testing.T) {
+func TestRecordsCRUD(t *testing.T) {
 	e := newEnv(t, false)
 
-	w := e.do(t, "POST", "/api/tags", map[string]any{"name": "Metallica — Essential", "url": "https://music.apple.com/us/playlist/x/pl.1", "shuffle": true})
+	w := e.do(t, "POST", "/api/records", map[string]any{
+		"name": "Metallica — Essential", "items": []any{map[string]any{"media": "https://music.apple.com/us/playlist/x/pl.1"}},
+		"shuffle": map[string]any{"albums": true, "artists": nil, "playlists": false, "other": nil},
+		"label":   map[string]any{"title": " Metallica ", "subtitle": "", "artwork": nil},
+	})
 	wantStatus(t, w, http.StatusCreated)
-	created := decode[model.Entry](t, w)
-	if created.ID != "metallica-essential" || created.Repeat != model.RepeatAll || created.TagIDs == nil {
+	created := decode[model.Record](t, w)
+	if created.ID != "metallica-essential" || created.Aliases == nil || len(created.Items) != 1 || !created.Shuffle.For(model.MediaAlbum) || created.Shuffle.For(model.MediaPlaylist) {
 		t.Fatalf("created %+v", created)
 	}
+	if created.Label.Title == nil || *created.Label.Title != "Metallica" || created.Label.Subtitle != nil {
+		t.Fatalf("label %+v", created.Label)
+	}
 
-	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "metallica — essential", "url": "apple_music://album/1"}), http.StatusConflict)
-	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "X"}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "X", "url": "apple_music://album/1", "volum": 3}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/tags", "{not json"), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/records", map[string]any{"name": "metallica — essential | x"}), http.StatusConflict)
+	wantJSONError(t, e.do(t, "POST", "/api/records", map[string]any{"name": " "}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/records", map[string]any{"name": "X", "items": []any{map[string]any{"media": "https://example.com/x"}}}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/records", map[string]any{"name": "X", "items": []any{map[string]any{"record": "nope"}}}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/records", map[string]any{"name": "X", "volum": 3}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/records", "{not json"), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "POST", "/api/records", map[string]any{"id": created.ID, "name": "Other"}), http.StatusConflict)
 
-	w = e.do(t, "GET", "/api/tags", nil)
+	mix := e.mustCreate(t, model.Record{Name: "Mix", Items: []model.RecordItem{{Record: created.ID}, {Others: true}}})
+
+	w = e.do(t, "GET", "/api/records", nil)
 	wantStatus(t, w, http.StatusOK)
-	if list := decode[[]model.Entry](t, w); len(list) != 1 {
+	if list := decode[[]model.Record](t, w); len(list) != 2 {
 		t.Fatalf("list %+v", list)
 	}
 
-	created.Volume = new(int)
-	*created.Volume = 30
-	w = e.do(t, "PUT", "/api/tags/metallica-essential", created)
+	vol := 30
+	created.Volume = &vol
+	w = e.do(t, "PUT", "/api/records/metallica-essential", created)
 	wantStatus(t, w, http.StatusOK)
-	if got := decode[model.Entry](t, w); got.Volume == nil || *got.Volume != 30 {
+	if got := decode[model.Record](t, w); got.Volume == nil || *got.Volume != 30 {
 		t.Fatalf("updated %+v", got)
 	}
-	wantJSONError(t, e.do(t, "PUT", "/api/tags/metallica-essential", map[string]any{"id": "other", "name": "X", "url": "apple_music://album/1"}), http.StatusBadRequest)
 	created.ID = ""
-	wantJSONError(t, e.do(t, "PUT", "/api/tags/missing", created), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "PUT", "/api/records/missing", created), http.StatusNotFound)
+	created.ID = "Bad Id"
+	wantJSONError(t, e.do(t, "PUT", "/api/records/metallica-essential", created), http.StatusBadRequest)
 
-	wantStatus(t, e.do(t, "DELETE", "/api/tags/metallica-essential", nil), http.StatusNoContent)
-	wantJSONError(t, e.do(t, "DELETE", "/api/tags/metallica-essential", nil), http.StatusNotFound)
-}
-
-func TestPoolTags(t *testing.T) {
-	e := newEnv(t, false)
-
-	w := e.do(t, "POST", "/api/tags", map[string]any{"name": "Kitchen mix", "pool": " kitchen "})
-	wantStatus(t, w, http.StatusCreated)
-	if got := decode[model.Entry](t, w); got.Pool != "kitchen" || got.URL != "" {
-		t.Fatalf("created %+v", got)
-	}
-	wantStatus(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "Everything", "pool": "all"}), http.StatusCreated)
-	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "Both", "pool": "kitchen", "url": "apple_music://album/1"}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/tags", map[string]any{"name": "Bad", "pool": "Kitchen Mix"}), http.StatusBadRequest)
-}
-
-func TestPoolsCRUD(t *testing.T) {
-	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "A — B", URL: "apple_music://album/1"})
-
-	w := e.do(t, "GET", "/api/pools", nil)
+	// Rename: the new id goes in the body; the old one stays an alias and
+	// records that hold it follow.
+	created.ID = "metallica"
+	w = e.do(t, "PUT", "/api/records/metallica-essential", created)
 	wantStatus(t, w, http.StatusOK)
-	if got := w.Body.String(); !strings.Contains(got, `"pools":[]`) {
-		t.Fatalf("empty list %s", got)
-	}
-
-	body := map[string]any{"name": "Kitchen", "shuffle": true, "repeat": nil, "volume": nil, "player": nil,
-		"items": []map[string]string{{"tag": en.ID}, {"media": "Cat Stevens — Teaser and the Firecat"}}}
-	w = e.do(t, "POST", "/api/pools", body)
-	wantStatus(t, w, http.StatusCreated)
-	p := decode[model.Pool](t, w)
-	if p.ID != "kitchen" || len(p.Items) != 2 || p.Shuffle == nil || !*p.Shuffle {
-		t.Fatalf("created %+v", p)
-	}
-
-	body["id"] = "kitchen"
-	wantJSONError(t, e.do(t, "POST", "/api/pools", body), http.StatusConflict)
-	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"name": "Empty", "items": []any{}}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"name": "Gone", "items": []map[string]string{{"tag": "missing"}}}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"name": "X", "itms": []any{}}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/pools", map[string]any{"id": "all", "name": "All", "items": []map[string]string{{"tag": en.ID}}}), http.StatusBadRequest)
-
-	w = e.do(t, "GET", "/api/pools", nil)
-	if got := decode[poolList](t, w); len(got.Pools) != 1 || got.Pools[0].ID != "kitchen" {
-		t.Fatalf("list %+v", got)
-	}
-
-	p.Items = p.Items[1:]
-	vol := 40
-	p.Volume = &vol
-	w = e.do(t, "PUT", "/api/pools/kitchen", p)
-	wantStatus(t, w, http.StatusOK)
-	if got := decode[model.Pool](t, w); len(got.Items) != 1 || got.Volume == nil || *got.Volume != 40 {
-		t.Fatalf("updated %+v", got)
-	}
-	p.ID = ""
-	wantJSONError(t, e.do(t, "PUT", "/api/pools/missing", p), http.StatusNotFound)
-
-	// Rename: the new id goes in the body.
-	p.ID = "kitchen-mix"
-	w = e.do(t, "PUT", "/api/pools/kitchen", p)
-	wantStatus(t, w, http.StatusOK)
-	if got := decode[model.Pool](t, w); got.ID != "kitchen-mix" {
+	if got := decode[model.Record](t, w); got.ID != "metallica" || len(got.Aliases) != 1 || got.Aliases[0] != "metallica-essential" {
 		t.Fatalf("renamed %+v", got)
 	}
-	p.ID = "Kitchen Mix"
-	wantJSONError(t, e.do(t, "PUT", "/api/pools/kitchen-mix", p), http.StatusBadRequest)
+	if got, _ := e.recs.Get(mix.ID); got.Items[0].Record != "metallica" {
+		t.Fatalf("reference not renamed: %+v", got.Items)
+	}
 
-	wantStatus(t, e.do(t, "DELETE", "/api/pools/kitchen-mix", nil), http.StatusNoContent)
-	wantJSONError(t, e.do(t, "DELETE", "/api/pools/kitchen-mix", nil), http.StatusNotFound)
+	wantStatus(t, e.do(t, "DELETE", "/api/records/metallica", nil), http.StatusNoContent)
+	wantJSONError(t, e.do(t, "DELETE", "/api/records/metallica", nil), http.StatusNotFound)
 }
 
 func TestPlayCommand(t *testing.T) {
 	e := newEnv(t, false)
 
-	w := e.do(t, "POST", "/api/play", map[string]any{"area": "office", "pool": "all", "volume": 20})
+	w := e.do(t, "POST", "/api/play", map[string]any{"area": "office", "record": "kitchen", "volume": 20})
 	wantStatus(t, w, http.StatusOK)
-	if got := decode[model.PlayResult](t, w); got.Player != "music_assistant" || got.PoolID != "all" {
+	if got := decode[model.PlayResult](t, w); got.Player != "music_assistant" || got.RecordID != "kitchen" {
 		t.Fatalf("result %+v", got)
 	}
 	cmd := e.play.cmds[0]
 	if cmd.Source != model.SourceUI || cmd.AreaID != "office" || cmd.Volume == nil || *cmd.Volume != 20 {
 		t.Fatalf("cmd %+v", cmd)
 	}
+	// The v1 keys still pass through to scan, which resolves them.
+	for _, body := range []map[string]any{{"area": "office", "tag": "x"}, {"area": "office", "pool": "all"}} {
+		wantStatus(t, e.do(t, "POST", "/api/play", body), http.StatusOK)
+	}
 
 	for _, body := range []any{
-		map[string]any{"pool": "all"}, // no target
-		map[string]any{"area": "office", "player": "media_player.x", "pool": "all"}, // two targets
-		map[string]any{"area": "office", "media": " "},                              // no media
-		map[string]any{"area": "office", "media": "x", "source": "event"},           // source is not client input
+		map[string]any{"record": "kitchen"},                                               // no target
+		map[string]any{"area": "office", "player": "media_player.x", "record": "kitchen"}, // two targets
+		map[string]any{"area": "office", "media": " "},                                    // no media
+		map[string]any{"area": "office", "media": "x", "source": "event"},                 // source is not client input
 		"{",
 	} {
 		wantJSONError(t, e.do(t, "POST", "/api/play", body), http.StatusBadRequest)
 	}
-	if len(e.play.cmds) != 1 {
+	if len(e.play.cmds) != 3 {
 		t.Fatalf("bad requests reached the player: %+v", e.play.cmds)
 	}
 
 	for err, code := range map[error]int{
-		fmt.Errorf("pick: %w: kitchen", pools.ErrNotFound):       http.StatusNotFound,
-		fmt.Errorf("%w: kitchen", rooms.ErrUnknownArea):          http.StatusNotFound,
-		fmt.Errorf("%w: light.x", rooms.ErrUnsupportedEntity):    http.StatusBadRequest,
-		fmt.Errorf("%w: volume 120", scan.ErrInvalid):            http.StatusBadRequest,
-		fmt.Errorf("pool kitchen: %w", scan.ErrNestedPool):       http.StatusConflict,
-		fmt.Errorf("pool \"all\": %w", scan.ErrEmptyPool):        http.StatusConflict,
-		fmt.Errorf("%w: media_player.x", rooms.ErrUnknownEntity): http.StatusNotFound,
-		errors.New("speaker offline"):                            http.StatusBadGateway,
+		fmt.Errorf("%w: kitchen", records.ErrNotFound):                 http.StatusNotFound,
+		fmt.Errorf("%w: kitchen", rooms.ErrUnknownArea):                http.StatusNotFound,
+		fmt.Errorf("%w: light.x", rooms.ErrUnsupportedEntity):          http.StatusBadRequest,
+		fmt.Errorf("%w: volume 120", scan.ErrInvalid):                  http.StatusBadRequest,
+		fmt.Errorf("record \"kitchen\": %w", records.ErrNothingToPlay): http.StatusConflict,
+		fmt.Errorf("%w: media_player.x", rooms.ErrUnknownEntity):       http.StatusNotFound,
+		errors.New("speaker offline"):                                  http.StatusBadGateway,
 	} {
 		e.play.err = err
-		wantJSONError(t, e.do(t, "POST", "/api/play", map[string]any{"area": "kitchen", "pool": "kitchen"}), code)
+		wantJSONError(t, e.do(t, "POST", "/api/play", map[string]any{"area": "kitchen", "record": "kitchen"}), code)
 	}
 }
 
@@ -493,7 +491,7 @@ func TestStop(t *testing.T) {
 
 func TestEmptyListIsArray(t *testing.T) {
 	e := newEnv(t, false)
-	w := e.do(t, "GET", "/api/tags", nil)
+	w := e.do(t, "GET", "/api/records", nil)
 	if strings.TrimSpace(w.Body.String()) != "[]" {
 		t.Fatalf("body %q, want []", w.Body.String())
 	}
@@ -501,45 +499,55 @@ func TestEmptyListIsArray(t *testing.T) {
 
 func TestBodyTooLarge(t *testing.T) {
 	e := newEnv(t, false)
-	big := `{"name":"` + strings.Repeat("a", maxBodyBytes+10) + `","url":"apple_music://album/1"}`
-	wantJSONError(t, e.do(t, "POST", "/api/tags", big), http.StatusRequestEntityTooLarge)
+	big := `{"name":"` + strings.Repeat("a", maxBodyBytes+10) + `"}`
+	wantJSONError(t, e.do(t, "POST", "/api/records", big), http.StatusRequestEntityTooLarge)
 }
 
 func TestPlay(t *testing.T) {
 	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "A — B", URL: "apple_music://album/1"})
+	r := e.mustCreate(t, model.Record{Name: "A — B", Items: media("apple_music://album/1")})
 
-	wantJSONError(t, e.do(t, "POST", "/api/tags/"+en.ID+"/play", map[string]string{}), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "POST", "/api/tags/nope/play", map[string]string{"area_id": "office"}), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "POST", "/api/records/"+r.ID+"/play", map[string]string{}), http.StatusBadRequest)
 
-	w := e.do(t, "POST", "/api/tags/"+en.ID+"/play", map[string]string{"area_id": "office"})
+	w := e.do(t, "POST", "/api/records/"+r.ID+"/play", map[string]string{"area_id": "office"})
 	wantStatus(t, w, http.StatusOK)
 	if got := decode[playResponse](t, w); got.Player != "sonos" {
 		t.Fatalf("player %q", got.Player)
 	}
-	if len(e.play.played) != 1 || e.play.played[0] != en.ID+"@office" {
+	if len(e.play.played) != 1 || e.play.played[0] != r.ID+"@office" {
 		t.Fatalf("played %v", e.play.played)
 	}
 
-	e.play.err = errors.New("speaker offline")
-	wantJSONError(t, e.do(t, "POST", "/api/tags/"+en.ID+"/play", map[string]string{"area_id": "office"}), http.StatusBadGateway)
+	for err, code := range map[error]int{
+		fmt.Errorf("%w: nope", records.ErrNotFound):        http.StatusNotFound,
+		fmt.Errorf("record: %w", records.ErrNothingToPlay): http.StatusConflict,
+		fmt.Errorf("%w: office", rooms.ErrUnknownArea):     http.StatusNotFound,
+		errors.New("speaker offline"):                      http.StatusBadGateway,
+	} {
+		e.play.err = err
+		wantJSONError(t, e.do(t, "POST", "/api/records/"+r.ID+"/play", map[string]string{"area_id": "office"}), code)
+	}
 }
 
 func TestPanicBecomes500(t *testing.T) {
 	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "A", URL: "apple_music://album/1"})
+	r := e.mustCreate(t, model.Record{Name: "A", Items: media("apple_music://album/1")})
 	e.play.panic = true
-	wantJSONError(t, e.do(t, "POST", "/api/tags/"+en.ID+"/play", map[string]string{"area_id": "office"}), http.StatusInternalServerError)
+	wantJSONError(t, e.do(t, "POST", "/api/records/"+r.ID+"/play", map[string]string{"area_id": "office"}), http.StatusInternalServerError)
 }
 
 func TestArtwork(t *testing.T) {
 	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "A", URL: "apple_music://album/1"})
+	r := e.mustCreate(t, model.Record{Name: "A", Items: media("Some name", "apple_music://album/1")})
 
-	w := e.do(t, "GET", "/api/tags/"+en.ID+"/artwork", nil)
+	w := e.do(t, "GET", "/api/records/"+r.ID+"/artwork", nil)
 	wantStatus(t, w, http.StatusOK)
 	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
 		t.Fatalf("content type %q", ct)
+	}
+	// The art comes from the record's first item with a link.
+	if sub := e.art.lastSubject(t); sub.ID != r.ID || sub.Name != "A" || sub.URL != "apple_music://album/1" {
+		t.Fatalf("subject %+v", sub)
 	}
 	// The art behind a URL can change (Refresh art), so browsers revalidate.
 	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "no-cache") || strings.Contains(cc, "max-age") {
@@ -553,7 +561,7 @@ func TestArtwork(t *testing.T) {
 	if err != nil || img.Bounds().Dx() != 100 {
 		t.Fatalf("decode: %v %v", err, img)
 	}
-	w = e.do(t, "GET", "/api/tags/"+en.ID+"/artwork", nil, header("If-None-Match", etag))
+	w = e.do(t, "GET", "/api/records/"+r.ID+"/artwork", nil, header("If-None-Match", etag))
 	if w.Code != http.StatusNotModified || w.Body.Len() != 0 {
 		t.Fatalf("revalidation: status %d, %d bytes; want 304", w.Code, w.Body.Len())
 	}
@@ -561,13 +569,13 @@ func TestArtwork(t *testing.T) {
 	e.art.mu.Lock()
 	e.art.shade = 90
 	e.art.mu.Unlock()
-	w = e.do(t, "GET", "/api/tags/"+en.ID+"/artwork", nil, header("If-None-Match", etag))
+	w = e.do(t, "GET", "/api/records/"+r.ID+"/artwork", nil, header("If-None-Match", etag))
 	wantStatus(t, w, http.StatusOK)
 	if w.Header().Get("ETag") == etag {
 		t.Fatal("ETag did not change with the art")
 	}
 
-	w = e.do(t, "GET", "/api/tags/"+en.ID+"/artwork?size=32&refresh=1", nil)
+	w = e.do(t, "GET", "/api/records/"+r.ID+"/artwork?size=32&refresh=1", nil)
 	wantStatus(t, w, http.StatusOK)
 	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("refresh cache-control %q", cc)
@@ -580,30 +588,55 @@ func TestArtwork(t *testing.T) {
 		t.Fatalf("refresh not passed: %d", e.art.refreshs)
 	}
 
-	wantJSONError(t, e.do(t, "GET", "/api/tags/"+en.ID+"/artwork?size=5", nil), http.StatusBadRequest)
-	wantJSONError(t, e.do(t, "GET", "/api/tags/nope/artwork", nil), http.StatusNotFound)
-	e.art.fail[en.ID] = true
-	wantJSONError(t, e.do(t, "GET", "/api/tags/"+en.ID+"/artwork", nil), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "GET", "/api/records/"+r.ID+"/artwork?size=5", nil), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "GET", "/api/records/nope/artwork", nil), http.StatusNotFound)
+	e.art.fail[r.ID] = true
+	wantJSONError(t, e.do(t, "GET", "/api/records/"+r.ID+"/artwork", nil), http.StatusNotFound)
+}
+
+func TestMediaArtwork(t *testing.T) {
+	e := newEnv(t, false)
+	const link = "https://music.apple.com/us/album/teaser/1"
+
+	w := e.do(t, "GET", "/api/artwork/media?size=64&url="+url.QueryEscape(link), nil)
+	wantStatus(t, w, http.StatusOK)
+	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("content type %q", ct)
+	}
+	if img, err := jpeg.Decode(w.Body); err != nil || img.Bounds().Dx() != 64 {
+		t.Fatalf("thumb: %v", err)
+	}
+	if sub := e.art.lastSubject(t); sub.ID != "" || sub.Name != link || sub.URL != link {
+		t.Fatalf("subject %+v", sub)
+	}
+
+	for _, u := range []string{"", "Cat Stevens — Teaser", "https://example.com/x"} {
+		wantJSONError(t, e.do(t, "GET", "/api/artwork/media?url="+url.QueryEscape(u), nil), http.StatusBadRequest)
+	}
+	wantJSONError(t, e.do(t, "GET", "/api/artwork/media?size=1&url="+url.QueryEscape(link), nil), http.StatusBadRequest)
+	e.art.fail[link] = true
+	wantJSONError(t, e.do(t, "GET", "/api/artwork/media?url="+url.QueryEscape(link), nil), http.StatusNotFound)
 }
 
 func TestHATags(t *testing.T) {
 	e := newEnv(t, false)
-	byID := e.mustCreate(t, model.Entry{Name: "Linked", URL: "apple_music://album/1", TagIDs: []string{"t1"}})
-	byName := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1"})
+	r := e.mustCreate(t, model.Record{Name: "Metallica — Essential", Items: media("apple_music://album/1")})
 	now := time.Now().UTC().Truncate(time.Second)
 	e.tags.tags = []ha.Tag{
-		{ID: "t1", Name: "whatever"},
-		{ID: "t2", Name: "Metallica — Essential | kitchen", LastScanned: &now},
-		{ID: "t3", Name: "Unknown"},
+		{ID: "t1", Name: "Metallica — Essential | kitchen", LastScanned: &now},
+		{ID: "metallica-essential", Name: "Unknown"}, // a tag id is no match
 	}
 	w := e.do(t, "GET", "/api/ha/tags", nil)
 	wantStatus(t, w, http.StatusOK)
 	got := decode[[]haTag](t, w)
-	if len(got) != 3 || got[0].EntryID != byID.ID || got[1].EntryID != byName.ID || got[2].EntryID != "" {
+	if len(got) != 2 || got[0].RecordID != r.ID || got[1].RecordID != "" {
 		t.Fatalf("got %+v", got)
 	}
-	if got[1].LastScanned == nil || !got[1].LastScanned.Equal(now) {
-		t.Fatalf("last_scanned %v", got[1].LastScanned)
+	if got[0].LastScanned == nil || !got[0].LastScanned.Equal(now) {
+		t.Fatalf("last_scanned %v", got[0].LastScanned)
+	}
+	if !strings.Contains(w.Body.String(), `"record_id":""`) {
+		t.Fatalf("record_id missing for no match: %s", w.Body.String())
 	}
 
 	e.tags.err = errors.New("disconnected")
@@ -612,12 +645,12 @@ func TestHATags(t *testing.T) {
 
 func TestRenameHATag(t *testing.T) {
 	e := newEnv(t, false)
-	en := e.mustCreate(t, model.Entry{Name: "Ghost — Impera", URL: "apple_music://album/1"})
+	r := e.mustCreate(t, model.Record{Name: "Ghost — Impera", Items: media("apple_music://album/1")})
 	e.tags.tags = []ha.Tag{{ID: "t1", Name: "Tag 1a2b"}}
 
 	w := e.do(t, "PUT", "/api/ha/tags/t1", map[string]any{"name": "  Ghost — Impera "})
 	wantStatus(t, w, http.StatusOK)
-	if got := decode[haTag](t, w); got.Name != "Ghost — Impera" || got.EntryID != en.ID {
+	if got := decode[haTag](t, w); got.Name != "Ghost — Impera" || got.RecordID != r.ID {
 		t.Fatalf("got %+v", got)
 	}
 	if e.tags.tags[0].Name != "Ghost — Impera" {
@@ -629,6 +662,19 @@ func TestRenameHATag(t *testing.T) {
 	wantJSONError(t, e.do(t, "PUT", "/api/ha/tags/nope", map[string]any{"name": "x"}), http.StatusNotFound)
 	e.tags.err = errors.New("disconnected")
 	wantJSONError(t, e.do(t, "PUT", "/api/ha/tags/t1", map[string]any{"name": "x"}), http.StatusBadGateway)
+}
+
+func TestDeleteHATag(t *testing.T) {
+	e := newEnv(t, false)
+	e.tags.tags = []ha.Tag{{ID: "t1", Name: "Old"}, {ID: "t2", Name: "Keep"}}
+
+	wantStatus(t, e.do(t, "DELETE", "/api/ha/tags/t1", nil), http.StatusNoContent)
+	if len(e.tags.tags) != 1 || e.tags.tags[0].ID != "t2" {
+		t.Fatalf("HA tags %+v", e.tags.tags)
+	}
+	wantJSONError(t, e.do(t, "DELETE", "/api/ha/tags/t1", nil), http.StatusNotFound)
+	e.tags.err = errors.New("disconnected")
+	wantJSONError(t, e.do(t, "DELETE", "/api/ha/tags/t2", nil), http.StatusBadGateway)
 }
 
 func TestHAAreas(t *testing.T) {
@@ -645,8 +691,8 @@ func TestHAAreas(t *testing.T) {
 func TestScans(t *testing.T) {
 	e := newEnv(t, false)
 	e.scans.Add(model.Scan{TagID: "x", TagName: "New Album", Result: model.ScanNoMatch})
-	e.scans.Add(model.Scan{TagID: "y", TagName: "Old", Result: model.ScanNoMatch})
-	en := e.mustCreate(t, model.Entry{Name: "Old", URL: "apple_music://album/1"})
+	e.scans.Add(model.Scan{TagID: "y", TagName: "Old | shelf", Result: model.ScanNoMatch})
+	r := e.mustCreate(t, model.Record{Name: "Old", Items: media("apple_music://album/1")})
 
 	w := e.do(t, "GET", "/api/scans", nil)
 	wantStatus(t, w, http.StatusOK)
@@ -654,42 +700,35 @@ func TestScans(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0]["tag_name"] != "Old" || got[0]["matches_entry"] != en.ID || got[1]["matches_entry"] != "" {
+	if len(got) != 2 || got[0]["tag_name"] != "Old | shelf" || got[0]["matches_record"] != r.ID || got[1]["matches_record"] != "" {
 		t.Fatalf("got %+v", got)
 	}
 	if got[0]["result"] != "no_match" {
 		t.Fatalf("scan fields not flattened: %+v", got[0])
 	}
+	if _, ok := got[0]["matches_entry"]; ok {
+		t.Fatalf("v1 field left: %+v", got[0])
+	}
 
-	e.scans.Add(model.Scan{Source: model.SourceEvent, TagName: "pool kitchen", PoolID: "kitchen", Media: "x", Result: model.ScanStopped})
+	e.scans.Add(model.Scan{Source: model.SourceEvent, TagName: "record kitchen", RecordID: "kitchen", Media: "x", Result: model.ScanStopped})
 	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
-	if got[0]["source"] != "event" || got[0]["pool_id"] != "kitchen" || got[0]["result"] != "stopped" {
+	if got[0]["source"] != "event" || got[0]["record_id"] != "kitchen" || got[0]["result"] != "stopped" {
 		t.Fatalf("event scan %+v", got[0])
 	}
 
 	// A tag renamed in HA shows and resolves by its new name.
 	e.tags.tags = []ha.Tag{{ID: "x", Name: "Old"}}
 	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
-	if last := got[len(got)-1]; last["tag_name"] != "New Album" || last["ha_name"] != "Old" || last["matches_entry"] != en.ID {
+	if last := got[len(got)-1]; last["tag_name"] != "New Album" || last["ha_name"] != "Old" || last["matches_record"] != r.ID {
 		t.Fatalf("renamed scan %+v", last)
 	}
 	e.tags.tags = nil
 
-	// A name that plays a pool is not unknown either.
-	e.scans.Add(model.Scan{TagID: "z", TagName: "Party Mix", Result: model.ScanNoMatch})
-	if _, err := e.pools.Create(model.Pool{Name: "Party mix", Items: []model.PoolItem{{Media: "apple_music://album/1"}}}); err != nil {
-		t.Fatal(err)
-	}
-	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
-	if got[0]["matches_pool"] != "party-mix" || got[0]["matches_entry"] != "" {
-		t.Fatalf("pool scan %+v", got[0])
-	}
-
 	// An event's description is not a tag name, even when it equals one.
 	e.scans.Add(model.Scan{Source: model.SourceUI, TagName: "Old", Media: "Old", Result: model.ScanNoMatch})
 	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
-	if got[0]["matches_entry"] != "" {
-		t.Fatalf("ui scan resolved to %v", got[0]["matches_entry"])
+	if got[0]["matches_record"] != "" {
+		t.Fatalf("ui scan resolved to %v", got[0]["matches_record"])
 	}
 }
 
@@ -797,11 +836,11 @@ func TestLayouts(t *testing.T) {
 
 func TestPrintPreview(t *testing.T) {
 	e := newEnv(t, false)
-	a := e.mustCreate(t, model.Entry{Name: "A — B", URL: "apple_music://album/1"})
-	b := e.mustCreate(t, model.Entry{Name: "C", URL: "apple_music://album/1"})
+	a := e.mustCreate(t, model.Record{Name: "A — B", Items: media("apple_music://album/1")})
+	b := e.mustCreate(t, model.Record{Name: "C", Items: media("apple_music://album/1")})
 
 	w := e.do(t, "POST", "/api/print/preview", printRequest{
-		EntryIDs: []string{a.ID, b.ID}, TemplateID: "avery-5434", Copies: 2, StartRow: 2, StartCol: 2,
+		RecordIDs: []string{a.ID, b.ID}, TemplateID: "avery-5434", Copies: 2, StartRow: 2, StartCol: 2,
 	})
 	wantStatus(t, w, http.StatusOK)
 	got := decode[previewResponse](t, w)
@@ -819,16 +858,16 @@ func TestPrintPreview(t *testing.T) {
 		t.Fatalf("missing art %+v, want none", got.MissingArt)
 	}
 
-	// Entries without art are listed, so the UI can warn before printing.
+	// Records without art are listed, so the UI can warn before printing.
 	e.art.fail[b.ID] = true
-	w = e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{a.ID, b.ID}, TemplateID: "avery-5434"})
+	w = e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID, b.ID}, TemplateID: "avery-5434"})
 	wantStatus(t, w, http.StatusOK)
 	if got := decode[previewResponse](t, w); len(got.MissingArt) != 1 || got.MissingArt[0].ID != b.ID || got.MissingArt[0].Name != "C" {
 		t.Fatalf("missing art %+v", got.MissingArt)
 	}
 	// An outline preview prints no art, so it looks none up.
 	calls := len(e.art.calls)
-	w = e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{b.ID}, TemplateID: "avery-5434", Outline: true})
+	w = e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{b.ID}, TemplateID: "avery-5434", Outline: true})
 	if got := decode[previewResponse](t, w); got.MissingArt == nil || len(got.MissingArt) != 0 || len(e.art.calls) != calls {
 		t.Fatalf("outline preview: missing %v, art calls %d → %d", got.MissingArt, calls, len(e.art.calls))
 	}
@@ -837,23 +876,23 @@ func TestPrintPreview(t *testing.T) {
 	wantStatus(t, e.do(t, "POST", "/api/print/preview", printRequest{Sample: maxSample, TemplateID: "avery-5434", Outline: true}), http.StatusOK)
 
 	// Saved offset is used when the request has none.
-	e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{a.ID}, TemplateID: "avery-5260"})
+	e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID}, TemplateID: "avery-5260"})
 	if job := e.lbl.lastJob(t); job.Offset.YMM != -0.75 {
 		t.Fatalf("offset %+v", job.Offset)
 	}
-	e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{a.ID}, TemplateID: "avery-5260", Offset: &model.Offset{XMM: 1}})
+	e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID}, TemplateID: "avery-5260", Offset: &model.Offset{XMM: 1}})
 	if job := e.lbl.lastJob(t); job.Offset != (model.Offset{XMM: 1}) {
 		t.Fatalf("offset %+v", job.Offset)
 	}
 
 	bad := []printRequest{
 		{TemplateID: "avery-5434"},
-		{EntryIDs: []string{a.ID}},
-		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", StartRow: 6},
-		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", StartCol: 3},
-		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", Copies: 101},
-		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", Skip: -1},
-		{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", StartRow: 5, StartCol: 2, Skip: 1},
+		{RecordIDs: []string{a.ID}},
+		{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", StartRow: 6},
+		{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", StartCol: 3},
+		{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", Copies: 101},
+		{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", Skip: -1},
+		{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", StartRow: 5, StartCol: 2, Skip: 1},
 		{Sample: maxSample + 1, TemplateID: "avery-5434"},
 	}
 	for i, req := range bad {
@@ -862,19 +901,19 @@ func TestPrintPreview(t *testing.T) {
 			t.Errorf("case %d: status %d, body %s", i, w.Code, w.Body.String())
 		}
 	}
-	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{"nope"}, TemplateID: "avery-5434"}), http.StatusNotFound)
-	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{a.ID}, TemplateID: "nope"}), http.StatusNotFound)
-	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{a.ID}, TemplateID: "avery-5434", BackgroundID: "nope"}), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{"nope"}, TemplateID: "avery-5434"}), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID}, TemplateID: "nope"}), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{a.ID}, TemplateID: "avery-5434", BackgroundID: "nope"}), http.StatusNotFound)
 }
 
 func TestPrintPDF(t *testing.T) {
 	e := newEnv(t, false)
 	title := "Custom title"
-	a := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1", Label: model.LabelOverrides{Title: &title}})
-	b := e.mustCreate(t, model.Entry{Name: "No Art", URL: "apple_music://album/1"})
+	a := e.mustCreate(t, model.Record{Name: "Metallica — Essential", Items: media("apple_music://album/1"), Label: model.LabelOverrides{Title: &title}})
+	b := e.mustCreate(t, model.Record{Name: "No Art", Items: media("apple_music://album/1")})
 	e.art.fail[b.ID] = true
 
-	w := e.do(t, "POST", "/api/print/pdf", printRequest{EntryIDs: []string{a.ID, b.ID}, TemplateID: "avery-5260", BackgroundID: "black"})
+	w := e.do(t, "POST", "/api/print/pdf", printRequest{RecordIDs: []string{a.ID, b.ID}, TemplateID: "avery-5260", BackgroundID: "black"})
 	wantStatus(t, w, http.StatusOK)
 	if ct := w.Header().Get("Content-Type"); ct != "application/pdf" {
 		t.Fatalf("content type %q", ct)
@@ -979,7 +1018,7 @@ func TestUI(t *testing.T) {
 		}
 	}
 
-	for _, f := range []string{"app.js", "lib.js", "fuzzy.js", "tags.js", "pools.js", "scans.js", "print.js", "templates.js", "backgrounds.js", "settings.js"} {
+	for _, f := range []string{"app.js", "lib.js", "fuzzy.js", "records.js", "tags.js", "print.js", "templates.js", "backgrounds.js", "settings.js"} {
 		w := e.do(t, "GET", "/"+f, nil)
 		wantStatus(t, w, http.StatusOK)
 		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
@@ -1005,7 +1044,7 @@ func TestSupervisorClientFilter(t *testing.T) {
 		"garbage":                http.StatusForbidden,
 	}
 	for addr, want := range cases {
-		w := e.do(t, "GET", "/api/tags", nil, remote(addr), header("X-Forwarded-For", "172.30.32.2"))
+		w := e.do(t, "GET", "/api/records", nil, remote(addr), header("X-Forwarded-For", "172.30.32.2"))
 		if w.Code != want {
 			t.Errorf("%s: status %d, want %d", addr, w.Code, want)
 		}
@@ -1017,7 +1056,7 @@ func TestSupervisorClientFilter(t *testing.T) {
 
 	// Outside Supervisor (dev mode) any client is accepted.
 	dev := newEnv(t, false)
-	wantStatus(t, dev.do(t, "GET", "/api/tags", nil, remote("192.168.1.10:1")), http.StatusOK)
+	wantStatus(t, dev.do(t, "GET", "/api/records", nil, remote("192.168.1.10:1")), http.StatusOK)
 }
 
 func TestPDFNames(t *testing.T) {
@@ -1096,10 +1135,10 @@ func TestPDFNames(t *testing.T) {
 
 func TestDefaultBackground(t *testing.T) {
 	e := newEnv(t, false)
-	a := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1"})
+	a := e.mustCreate(t, model.Record{Name: "Metallica — Essential", Items: media("apple_music://album/1")})
 	print := func() string {
 		t.Helper()
-		w := e.do(t, "POST", "/api/print/pdf", printRequest{EntryIDs: []string{a.ID}, TemplateID: "avery-5260"})
+		w := e.do(t, "POST", "/api/print/pdf", printRequest{RecordIDs: []string{a.ID}, TemplateID: "avery-5260"})
 		wantStatus(t, w, http.StatusOK)
 		return e.lbl.lastJob(t).Background.ID
 	}
@@ -1126,72 +1165,50 @@ func TestDefaultBackground(t *testing.T) {
 	}
 }
 
-func TestPoolArtworkAndLabel(t *testing.T) {
+func TestPrintNestedRecord(t *testing.T) {
 	e := newEnv(t, false)
-	w := e.do(t, "POST", "/api/pools", map[string]any{
-		"name": "Kitchen", "items": []any{map[string]any{"media": "https://music.apple.com/us/album/x/1"}},
-		"label": map[string]any{"title": " Kitchen mix ", "subtitle": "", "artwork": nil},
-	})
-	wantStatus(t, w, http.StatusCreated)
-	p := decode[model.Pool](t, w)
-	if p.Label.Title == nil || *p.Label.Title != "Kitchen mix" || p.Label.Subtitle != nil {
-		t.Fatalf("label %+v", p.Label)
-	}
+	inner := e.mustCreate(t, model.Record{Name: "Disturbed — Divisible", Items: media("Some name", "apple_music://album/7")})
+	outer := e.mustCreate(t, model.Record{Name: "Kitchen", Items: []model.RecordItem{{Record: inner.ID}}})
 
-	w = e.do(t, "GET", "/api/pools/kitchen/artwork?size=64", nil)
-	wantStatus(t, w, http.StatusOK)
-	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
-		t.Fatalf("content type %q", ct)
-	}
-	if last := e.art.calls[len(e.art.calls)-1]; last != "pool:kitchen" {
-		t.Fatalf("art asked for %q", last)
-	}
-	wantStatus(t, e.do(t, "GET", "/api/pools/all/artwork", nil), http.StatusOK)
-	wantJSONError(t, e.do(t, "GET", "/api/pools/nope/artwork", nil), http.StatusNotFound)
-	e.art.fail["pool:kitchen"] = true
-	wantJSONError(t, e.do(t, "GET", "/api/pools/kitchen/artwork", nil), http.StatusNotFound)
-}
-
-func TestPrintPools(t *testing.T) {
-	e := newEnv(t, false)
-	a := e.mustCreate(t, model.Entry{Name: "Metallica — Essential", URL: "apple_music://album/1"})
-	sub := "Random"
-	if _, err := e.pools.Create(model.Pool{Name: "Kitchen", Items: []model.PoolItem{{Tag: a.ID}}, Label: model.LabelOverrides{Subtitle: &sub}}); err != nil {
-		t.Fatal(err)
-	}
-	w := e.do(t, "POST", "/api/print/pdf", printRequest{EntryIDs: []string{"pool:kitchen", a.ID, "pool:all"}, TemplateID: "avery-5260"})
+	w := e.do(t, "POST", "/api/print/pdf", printRequest{RecordIDs: []string{outer.ID}, TemplateID: "avery-5260"})
 	wantStatus(t, w, http.StatusOK)
 	job := e.lbl.lastJob(t)
-	if len(job.Items) != 3 || job.Items[0].Title != "Kitchen" || job.Items[0].Subtitle != "Random" || job.Items[0].Art == nil {
-		t.Fatalf("pool item %+v", job.Items)
+	if len(job.Items) != 1 || job.Items[0].Title != "Kitchen" || job.Items[0].Art == nil {
+		t.Fatalf("items %+v", job.Items)
 	}
-	if job.Items[2].Title != "All tags" {
-		t.Fatalf("all pool item %+v", job.Items[2])
+	// The label is the outer record's; the art is looked up for the inner link.
+	if sub := e.art.lastSubject(t); sub.ID != outer.ID || sub.URL != "apple_music://album/7" {
+		t.Fatalf("subject %+v", sub)
 	}
 	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="kitchen-`) {
 		t.Fatalf("disposition %q", cd)
 	}
-	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{"pool:nope"}, TemplateID: "avery-5260"}), http.StatusNotFound)
+
+	e.art.fail[outer.ID] = true
+	w = e.do(t, "POST", "/api/print/preview", printRequest{RecordIDs: []string{outer.ID}, TemplateID: "avery-5260"})
+	if got := decode[previewResponse](t, w); len(got.MissingArt) != 1 || got.MissingArt[0] != (recordRef{ID: outer.ID, Name: "Kitchen"}) {
+		t.Fatalf("missing art %+v", got.MissingArt)
+	}
 }
 
 type fakePicker struct{ previews []string }
 
-func (f *fakePicker) Candidates(_ context.Context, e model.Entry, offset, limit int) (artwork.CandidatePage, error) {
+func (f *fakePicker) Candidates(_ context.Context, s model.Subject, offset, limit int) (artwork.CandidatePage, error) {
 	if offset > 0 {
 		return artwork.CandidatePage{Items: []artwork.Candidate{{URL: "https://art/more", Label: "More", Kind: artwork.KindAlbum}}, Next: -1}, nil
 	}
-	return artwork.CandidatePage{Items: []artwork.Candidate{{URL: "https://art/" + e.ID, Label: "Cover", Kind: artwork.KindCover},
+	return artwork.CandidatePage{Items: []artwork.Candidate{{URL: "https://art/" + s.ID + "/" + s.Name + "/" + s.URL, Label: "Cover", Kind: artwork.KindCover},
 		{URL: "https://art/artist", Label: "Artist", Kind: artwork.KindArtist}}, Next: limit}, nil
 }
 
-func (f *fakePicker) SourceURL(_ context.Context, e model.Entry) (string, error) {
-	if e.Label.Artwork != nil {
-		return *e.Label.Artwork, nil
+func (f *fakePicker) SourceURL(_ context.Context, s model.Subject) (string, error) {
+	if s.Label.Artwork != nil {
+		return *s.Label.Artwork, nil
 	}
-	if e.URL == "" {
+	if s.URL == "" {
 		return "", errors.New("no art")
 	}
-	return "https://art/" + e.URL, nil
+	return "https://art/" + s.URL, nil
 }
 
 func (f *fakePicker) Preview(_ context.Context, u string) (image.Image, error) {
@@ -1205,31 +1222,40 @@ func (f *fakePicker) Preview(_ context.Context, u string) (image.Image, error) {
 func TestArtPicker(t *testing.T) {
 	e := newEnv(t, false)
 	file := "covers/a.jpg"
-	a := e.mustCreate(t, model.Entry{Name: "A", URL: "apple_music://album/1"})
-	b := e.mustCreate(t, model.Entry{Name: "B", URL: "apple_music://album/2", Label: model.LabelOverrides{Artwork: &file}})
-	if _, err := e.pools.Create(model.Pool{Name: "Mix", Items: []model.PoolItem{{Tag: a.ID}, {Tag: b.ID}, {Media: "Some name"}, {Media: "apple_music://album/1"}}}); err != nil {
-		t.Fatal(err)
-	}
-	pt := e.mustCreate(t, model.Entry{Name: "Mix tag", Pool: "mix"})
+	a := e.mustCreate(t, model.Record{Name: "A", Items: media("apple_music://album/1")})
+	b := e.mustCreate(t, model.Record{Name: "B", Items: media("apple_music://album/2"), Label: model.LabelOverrides{Artwork: &file}})
+	empty := e.mustCreate(t, model.Record{Name: "Empty"})
+	mix := e.mustCreate(t, model.Record{Name: "Mix", Items: []model.RecordItem{
+		{Record: a.ID}, {Record: b.ID}, {Record: empty.ID}, {Media: "Some name"}, {Media: "apple_music://album/1"}, {Media: "apple_music://album/3"}, {Others: true},
+	}})
 
-	page := decode[pickerPageResponse](t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates", nil))
-	if got := page.Items; len(got) != 2 || page.Next != pickerPage || got[0].URL != "https://art/"+a.ID || got[0].Preview != "api/artwork/preview?url=https%3A%2F%2Fart%2F"+a.ID {
-		t.Fatalf("entry candidates %+v", page)
+	// One link: its candidates, paged, looked up under the record's name.
+	page := decode[pickerPageResponse](t, e.do(t, "GET", "/api/records/"+a.ID+"/artwork/candidates", nil))
+	want := "https://art/a/A/apple_music://album/1"
+	if got := page.Items; len(got) != 2 || page.Next != pickerPage || got[0].URL != want || got[0].Preview != previewPath(want) {
+		t.Fatalf("record candidates %+v", page)
 	}
-	page = decode[pickerPageResponse](t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates?offset=12", nil))
+	page = decode[pickerPageResponse](t, e.do(t, "GET", "/api/records/"+a.ID+"/artwork/candidates?offset=12", nil))
 	if len(page.Items) != 1 || page.Next != -1 {
 		t.Fatalf("second page %+v", page)
 	}
-	wantJSONError(t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates?offset=-1", nil), http.StatusBadRequest)
-	// Pool items in order; the file override previews through its tag; the
-	// name item has no art; the duplicate URL shows once.
-	for _, path := range []string{"/api/pools/mix/artwork/candidates", "/api/tags/" + pt.ID + "/artwork/candidates"} {
-		got := decode[pickerPageResponse](t, e.do(t, "GET", path, nil)).Items
-		if len(got) != 2 || got[0].Label != "A" || got[1].URL != file || got[1].Preview != "api/tags/"+b.ID+"/artwork" {
-			t.Fatalf("%s: %+v", path, got)
-		}
+	wantJSONError(t, e.do(t, "GET", "/api/records/"+a.ID+"/artwork/candidates?offset=-1", nil), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "GET", "/api/records/nope/artwork/candidates", nil), http.StatusNotFound)
+
+	// Several items: the art of each, in order. A file override previews
+	// through its record; names, empty records and "others" have no art;
+	// the art of A and of its own link is the same URL and shows once.
+	got := decode[pickerPageResponse](t, e.do(t, "GET", "/api/records/"+mix.ID+"/artwork/candidates", nil))
+	if it := got.Items; len(it) != 3 || got.Next != -1 ||
+		it[0].Label != "A" || it[0].Kind != "item" ||
+		it[1].URL != file || it[1].Preview != "api/records/"+b.ID+"/artwork" ||
+		it[2].Label != "apple_music://album/3" || it[2].URL != "https://art/apple_music://album/3" {
+		t.Fatalf("mix candidates %+v", got)
 	}
-	wantJSONError(t, e.do(t, "GET", "/api/pools/nope/artwork/candidates", nil), http.StatusNotFound)
+	got = decode[pickerPageResponse](t, e.do(t, "GET", "/api/records/"+mix.ID+"/artwork/candidates?offset=1", nil))
+	if len(got.Items) != 0 || got.Next != -1 {
+		t.Fatalf("mix second page %+v", got)
+	}
 
 	w := e.do(t, "GET", "/api/artwork/preview?url=https%3A%2F%2Fart%2Fx&size=64", nil)
 	wantStatus(t, w, http.StatusOK)

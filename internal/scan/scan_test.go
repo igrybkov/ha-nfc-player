@@ -3,8 +3,11 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,37 +19,14 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/player"
 	"github.com/igrybkov/ha-nfc-player/internal/player/musicassistant"
 	"github.com/igrybkov/ha-nfc-player/internal/player/sonos"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/rooms"
+	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
 
 type settings struct{ s model.Settings }
 
 func (s *settings) Settings() model.Settings { return s.s }
-
-// entries is a minimal model.EntryLookup.
-type entries []model.Entry
-
-func (es entries) ByTagID(id string) (model.Entry, bool) {
-	for _, e := range es {
-		for _, t := range e.TagIDs {
-			if t == id {
-				return e, true
-			}
-		}
-	}
-	return model.Entry{}, false
-}
-
-func (es entries) ByName(name string) (model.Entry, bool) {
-	for _, e := range es {
-		if model.NormalizeName(e.Name) == name {
-			return e, true
-		}
-	}
-	return model.Entry{}, false
-}
-
-func (es entries) All() []model.Entry { return es }
 
 func ptr[T any](v T) *T { return &v }
 
@@ -56,41 +36,49 @@ const (
 	queenURL     = "https://music.apple.com/us/album/bohemian-rhapsody-the-original-soundtrack/6781027361"
 )
 
-var testEntries = entries{
-	{ID: "metallica-essential", Name: "Metallica — Essential", URL: metallicaURL, Shuffle: true, Repeat: model.RepeatAll, TagIDs: []string{}},
-	{ID: "disturbed-divisible", Name: "Disturbed — Divisible", URL: disturbedURL, Volume: ptr(50), TagIDs: []string{}},
-	{ID: "queen", Name: "Queen — Bohemian Rhapsody", URL: queenURL, Repeat: model.RepeatOne, TagIDs: []string{"tag-queen"}},
-	{ID: "on-ma", Name: "On MA", URL: disturbedURL, Player: ptr("music_assistant"), TagIDs: []string{}},
-	{ID: "kitchen-tag", Name: "Kitchen", Pool: "kitchen", Volume: ptr(55), Shuffle: false, Repeat: model.RepeatOff, TagIDs: []string{"tag-kitchen"}},
-	{ID: "nested-tag", Name: "Nested", Pool: "nested", TagIDs: []string{}},
+// shuffleAll is a Shuffle that says on for every kind, as a v1 entry with
+// shuffle true migrates.
+func shuffleAll(on bool) model.Shuffle {
+	return model.Shuffle{Albums: ptr(on), Artists: ptr(on), Playlists: ptr(on), Other: ptr(on)}
 }
 
-// poolMap is a minimal model.PoolLookup.
-type poolMap map[string]model.Pool
-
-func (m poolMap) Pool(id string) (model.Pool, bool) {
-	p, ok := m[id]
-	return p, ok
-}
-
-func (m poolMap) ByName(name string) (model.Pool, bool) {
-	for _, p := range m {
-		if model.NormalizeName(p.Name) == name || p.ID == name {
-			return p, true
-		}
+func media(m ...string) []model.RecordItem {
+	out := make([]model.RecordItem, len(m))
+	for i, v := range m {
+		out[i] = model.RecordItem{Media: v}
 	}
-	return model.Pool{}, false
+	return out
 }
 
-var testPools = poolMap{
-	// Settings: shuffle from the item, repeat one, volume 40.
-	"kitchen": {ID: "kitchen", Name: "Kitchen", Repeat: ptr(model.RepeatOne), Volume: ptr(40), Items: []model.PoolItem{
-		{Tag: "metallica-essential"}, {Media: queenURL}, {Media: "Volodymyr Ivasiuk"},
-	}},
-	"nested":  {ID: "nested", Name: "Nested", Items: []model.PoolItem{{Tag: "kitchen-tag"}}},
-	"missing": {ID: "missing", Name: "Missing", Items: []model.PoolItem{{Tag: "deleted"}}},
-	"empty":   {ID: "empty", Name: "Empty", Items: []model.PoolItem{}},
-	"party":   {ID: "party", Name: "Party Mix", Volume: ptr(40), Items: []model.PoolItem{{Media: queenURL}}},
+var testRecords = []model.Record{
+	{ID: "metallica-essential", Name: "Metallica — Essential", Items: media(metallicaURL), Shuffle: shuffleAll(true), Repeat: ptr(model.RepeatAll)},
+	{ID: "disturbed-divisible", Name: "Disturbed — Divisible", Items: media(disturbedURL), Shuffle: shuffleAll(false), Volume: ptr(50)},
+	{ID: "queen", Name: "Queen — Bohemian Rhapsody", Items: media(queenURL), Repeat: ptr(model.RepeatOne)},
+	{ID: "on-ma", Name: "On MA", Items: media(disturbedURL), Player: ptr("music_assistant")},
+	// Three items: a record, a URL and a name to search.
+	{ID: "kitchen", Name: "Kitchen", Aliases: []string{"tag:kitchen-tag", "pool:kitchen"}, Repeat: ptr(model.RepeatOne), Volume: ptr(40),
+		Items: []model.RecordItem{{Record: "metallica-essential"}, {Media: queenURL}, {Media: "Volodymyr Ivasiuk"}}},
+	{ID: "party", Name: "Party Mix", Items: media(queenURL), Volume: ptr(40)},
+	// An album with the shuffle defaults: in order.
+	{ID: "albums", Name: "Albums", Items: media(disturbedURL), Volume: ptr(40)},
+	// One path down to the Metallica playlist: its own settings apply, not
+	// metallica-essential's.
+	{ID: "nest", Name: "Nest", Aliases: []string{"tag:nest-tag"}, Items: []model.RecordItem{{Record: "metallica-essential"}},
+		Shuffle: model.Shuffle{Playlists: ptr(false)}, Repeat: ptr(model.RepeatOff), Volume: ptr(55)},
+	// Hand edits the store would refuse: they fail at play time.
+	{ID: "empty", Name: "Empty"},
+	{ID: "missing", Name: "Missing", Items: []model.RecordItem{{Record: "deleted"}}},
+	{ID: "bad-url", Name: "Bad URL", Items: media("https://open.spotify.com/album/1")},
+}
+
+// newRecords is a record store holding testRecords, written as they are.
+func newRecords(t testing.TB) *records.Store {
+	t.Helper()
+	f := store.Open(filepath.Join(t.TempDir(), records.FileName), records.DefaultFile)
+	if err := f.Save(records.File{Records: testRecords}); err != nil {
+		t.Fatal(err)
+	}
+	return records.New(f)
 }
 
 func fakeHA() *hatest.Fake {
@@ -147,7 +135,7 @@ func startWith(t *testing.T, f *hatest.Fake, roomsHA ha.Client, setup func(*Hand
 	ma := musicassistant.New(f, s)
 	router := player.NewRouter(s, ma, sonos.New(f, nil), ma)
 	ring := NewRing(LogSize)
-	h := New(Deps{HA: f, Entries: testEntries, Pools: testPools, Settings: s, Rooms: rs, Router: router, Log: ring, Logger: slog.New(slog.DiscardHandler)})
+	h := New(Deps{HA: f, Records: newRecords(t), Settings: s, Rooms: rs, Router: router, Log: ring, Logger: slog.New(slog.DiscardHandler)})
 	if setup != nil {
 		setup(h)
 	}
@@ -234,7 +222,7 @@ func TestScanPlaysByName(t *testing.T) {
 	// Name is cut at "|", trimmed and matched without case.
 	hs.scan("tag-1", "  metallica — ESSENTIAL | spare copy", "reader-fr")
 	s := hs.waitScans(t, 1)[0]
-	if s.Result != model.ScanPlayed || s.EntryID != "metallica-essential" || s.Player != "sonos" || s.AreaID != "family_room" {
+	if s.Result != model.ScanPlayed || s.RecordID != "metallica-essential" || s.Player != "sonos" || s.AreaID != "family_room" {
 		t.Fatalf("scan = %+v", s)
 	}
 	calls := hs.f.ServiceCalls()
@@ -250,16 +238,19 @@ func TestScanPlaysByName(t *testing.T) {
 	}
 }
 
-func TestScanTagIDBeatsName(t *testing.T) {
+// Records match by tag name only: a tag id, even one equal to a record id,
+// plays nothing on its own.
+func TestScanMatchesNameNotTagID(t *testing.T) {
 	hs := start(t, fakeHA())
-	hs.scan("tag-queen", "Metallica — Essential", "reader-office")
-	s := hs.waitScans(t, 1)[0]
-	if s.EntryID != "queen" {
-		t.Fatalf("EntryID = %q, want queen (tag ID match)", s.EntryID)
+	hs.scan("queen", "Queen — Bohemian Rhapsody", "reader-office")
+	hs.scan("queen", "Unknown", "reader-office")
+	scans := hs.waitScans(t, 2)
+	if scans[0].RecordID != "queen" || scans[1].Result != model.ScanNoMatch || scans[1].RecordID != "" {
+		t.Fatalf("scans = %+v", scans)
 	}
 	calls := hs.f.ServiceCalls()
-	if pm := playMedia(calls); pm[0].Data["media_content_id"] != queenURL {
-		t.Errorf("played %v", pm[0].Data["media_content_id"])
+	if pm := playMedia(calls); len(pm) != 1 || pm[0].Data["media_content_id"] != queenURL {
+		t.Errorf("play_media = %+v", pm)
 	}
 	if calls[2].Data["repeat"] != "one" {
 		t.Errorf("repeat = %v", calls[2].Data["repeat"])
@@ -271,7 +262,7 @@ func TestScanVolumeOrder(t *testing.T) {
 		name, tag, device string
 		want              float64
 	}{
-		{"entry volume", "Disturbed — Divisible", "reader-fr", 0.50},
+		{"record volume", "Disturbed — Divisible", "reader-fr", 0.50},
 		{"area volume", "Metallica — Essential", "reader-fr", 0.30},
 		{"default volume", "Metallica — Essential", "reader-garage", 0.15},
 	}
@@ -312,7 +303,7 @@ func TestScanUnknownRecorded(t *testing.T) {
 	hs.scan("tag-y", "Two — Dashes — Here", "reader-fr")
 	scans := hs.waitScans(t, 2)
 	for _, s := range scans {
-		if s.Result != model.ScanNoMatch || s.EntryID != "" || s.AreaID != "family_room" {
+		if s.Result != model.ScanNoMatch || s.RecordID != "" || s.AreaID != "family_room" {
 			t.Errorf("scan = %+v", s)
 		}
 	}
@@ -329,7 +320,7 @@ func TestScanNameFromTagRegistry(t *testing.T) {
 	f.TagList = []ha.Tag{{ID: "tag-1", Name: "Metallica — Essential"}}
 	hs := start(t, f)
 	hs.scan("tag-1", "", "reader-fr")
-	if s := hs.waitScans(t, 1)[0]; s.EntryID != "metallica-essential" || s.TagName != "Metallica — Essential" {
+	if s := hs.waitScans(t, 1)[0]; s.RecordID != "metallica-essential" || s.TagName != "Metallica — Essential" {
 		t.Fatalf("scan = %+v", s)
 	}
 }
@@ -348,7 +339,7 @@ func TestScanSearchFallback(t *testing.T) {
 	hs := start(t, f)
 	hs.scan("tag-r", "Ray Charles — The Ultimate Collection | b", "reader-fr")
 	s := hs.waitScans(t, 1)[0]
-	if s.Result != model.ScanPlayed || s.Player != "sonos" || s.EntryID != "" {
+	if s.Result != model.ScanPlayed || s.Player != "sonos" || s.RecordID != "" {
 		t.Fatalf("scan = %+v", s)
 	}
 	pm := playMedia(hs.f.ServiceCalls())
@@ -387,7 +378,7 @@ func TestScanErrorRecorded(t *testing.T) {
 	hs := start(t, f)
 	hs.scan("", "Metallica — Essential", "reader-office") // office has no MA entity
 	s := hs.waitScans(t, 1)[0]
-	if s.Result != model.ScanError || s.EntryID != "metallica-essential" || s.Error == "" {
+	if s.Result != model.ScanError || s.RecordID != "metallica-essential" || s.Error == "" {
 		t.Fatalf("scan = %+v", s)
 	}
 }
@@ -461,26 +452,29 @@ func TestScansSerializedPerArea(t *testing.T) {
 	}
 }
 
-func TestPlayEntryAndAreas(t *testing.T) {
+func TestPlayRecordAndAreas(t *testing.T) {
 	f := fakeHA()
 	s := &settings{model.DefaultSettings()}
 	rs := rooms.New(f, s)
 	ma := musicassistant.New(f, s)
-	h := New(Deps{HA: f, Entries: testEntries, Settings: s, Rooms: rs,
+	h := New(Deps{HA: f, Records: newRecords(t), Settings: s, Rooms: rs,
 		Router: player.NewRouter(s, ma, sonos.New(f, nil), ma), Logger: slog.New(slog.DiscardHandler)})
 	ctx := context.Background()
 
-	name, err := h.PlayEntry(ctx, testEntries[1], "office")
+	name, err := h.PlayRecord(ctx, "disturbed-divisible", "office")
 	if err != nil || name != "sonos" {
-		t.Fatalf("PlayEntry = %q, %v", name, err)
+		t.Fatalf("PlayRecord = %q, %v", name, err)
 	}
 	if v := volumeOf(t, f.Calls); v != 0.50 {
 		t.Errorf("volume = %v", v)
 	}
-	if _, err := h.PlayEntry(ctx, model.Entry{URL: "not a url"}, "office"); err == nil {
-		t.Error("bad URL: want error")
+	if _, err := h.PlayRecord(ctx, "bad-url", "office"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("bad URL: err = %v", err)
 	}
-	if _, err := h.PlayEntry(ctx, testEntries[0], "attic"); err == nil {
+	if _, err := h.PlayRecord(ctx, "nope", "office"); !errors.Is(err, records.ErrNotFound) {
+		t.Errorf("unknown record: err = %v", err)
+	}
+	if _, err := h.PlayRecord(ctx, "metallica-essential", "attic"); err == nil {
 		t.Error("unknown area: want error")
 	}
 
@@ -614,13 +608,13 @@ func TestScanAreaLookupTimeout(t *testing.T) {
 	}
 }
 
-// A tag with no entry, named like a pool, plays that pool with the pool's
-// settings. The name is matched as tag names are: cut at "|", no case.
-func TestScanPlaysPoolByName(t *testing.T) {
+// A scan plays the record its name matches: cut at "|", no case. The pick
+// is recorded as Media.
+func TestScanPlaysRecordByName(t *testing.T) {
 	hs := start(t, fakeHA())
 	hs.scan("tag-new", " PARTY mix | fridge card", "reader-fr")
 	s := hs.waitScans(t, 1)[0]
-	if s.Result != model.ScanPlayed || s.PoolID != "party" || s.EntryID != "" || s.Media != queenURL {
+	if s.Result != model.ScanPlayed || s.RecordID != "party" || s.Media != queenURL {
 		t.Fatalf("scan = %+v", s)
 	}
 	calls := hs.f.ServiceCalls()
@@ -628,6 +622,26 @@ func TestScanPlaysPoolByName(t *testing.T) {
 		t.Fatalf("play_media = %+v", pm)
 	}
 	if v := volumeOf(t, calls); v != 0.40 {
-		t.Errorf("volume = %v, want pool volume 0.40", v)
+		t.Errorf("volume = %v, want record volume 0.40", v)
+	}
+}
+
+// A scan of a record of records plays one item from inside, with the
+// scanned record's settings.
+func TestScanPlaysNestedRecord(t *testing.T) {
+	hs := start(t, fakeHA())
+	hs.scan("", "Nest", "reader-fr")
+	s := hs.waitScans(t, 1)[0]
+	if s.Result != model.ScanPlayed || s.RecordID != "nest" || s.Media != metallicaURL {
+		t.Fatalf("scan = %+v", s)
+	}
+	calls := hs.f.ServiceCalls()
+	if v := volumeOf(t, calls); v != 0.55 {
+		t.Errorf("volume = %v, want 0.55", v)
+	}
+	if !slices.ContainsFunc(calls, func(c hatest.ServiceCall) bool {
+		return c.Service == "shuffle_set" && c.Data["shuffle"] == false
+	}) {
+		t.Errorf("no shuffle off: %v", calls)
 	}
 }

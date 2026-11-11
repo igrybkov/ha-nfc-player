@@ -218,7 +218,7 @@ func writePDF(t *testing.T, dir, name string, job labels.Job) []byte {
 
 func sampleItems() []labels.Item {
 	str := func(s string) *string { return &s }
-	entries := []model.Entry{
+	subjects := []model.Subject{
 		{Name: "Metallica — Essential"},
 		{Name: "Volodymyr Ivasiuk", Label: model.LabelOverrides{Title: str("Володимир Івасюк")}},
 		{Name: "Queen — Bohemian Rhapsody (The Original Soundtrack)"},
@@ -226,8 +226,8 @@ func sampleItems() []labels.Item {
 		{Name: "Ray Charles — The Ultimate Collection"},
 		{Name: "Godspeed You! Black Emperor — Lift Your Skinny Fists Like Antennas to Heaven, Remastered Deluxe Anniversary Edition"},
 	}
-	out := make([]labels.Item, len(entries))
-	for i, e := range entries {
+	out := make([]labels.Item, len(subjects))
+	for i, e := range subjects {
 		var art image.Image
 		switch i {
 		case 3: // one label with no art: text-only path
@@ -236,7 +236,7 @@ func sampleItems() []labels.Item {
 		default:
 			art = testArt(uint8(i * 50))
 		}
-		out[i] = labels.ItemFromEntry(e, art)
+		out[i] = labels.ItemFromSubject(e, art)
 	}
 	return out
 }

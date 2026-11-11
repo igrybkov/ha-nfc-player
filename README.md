@@ -14,11 +14,14 @@ runs on `amd64` and `aarch64`.
   fallback.
 - Spotify links too: Sonos plays albums, playlists and tracks; Music
   Assistant plays artists.
-- Per-room volume and per-tag shuffle, repeat and volume.
-- Pools: a tag, button or dashboard tile plays a random album from a list.
+- Per-room volume, and per-record shuffle, repeat and volume. Albums play
+  in order by default; artists and playlists shuffle.
+- Records: a tag name plays one album, or a random pick from a list that
+  can hold other lists.
 - Play and stop from any automation with the `nfc_player_play` and
   `nfc_player_stop` events.
-- Tag registry in a web UI in the Home Assistant sidebar (Ingress).
+- Records and all Home Assistant tags in a web UI in the sidebar
+  (Ingress): rename and delete tags, see what each one plays.
 - Recent scans list, to see what matched and what failed.
 - Label printing to PDF. Layouts, templates and backgrounds are pluggable.
   You can add templates and backgrounds from the UI.
@@ -81,12 +84,19 @@ The image uses it as its Docker health check.
 
 Seed files for the migration from the old automation are in `examples/`.
 
+**Change the file format.** Files in `config_dir` carry a schema version.
+Add a step to `internal/migrate` that takes the current version to the
+next, bump `migrate.Current`, and add fixtures under
+`internal/migrate/testdata/v<N>/`. Steps work on YAML nodes, never on app
+types, and stay forever: files of any older version load. See the package
+doc.
+
 ## Extend
 
 **Add a player.** Write a type that implements `player.Player` (`Name`,
 `Supports`, `Play`) in a new package under `internal/player/`. Pass it to
 `player.NewRouter` in `cmd/nfc-player/main.go`. Its name can then be used in
-`settings.yaml` (`players.default`) and per tag.
+`settings.yaml` (`players.default`) and per record.
 
 **Add a label layout.** Add a file in `internal/labels/layouts/` with a type
 that implements `labels.Layout` (`ID`, `Name`, `Draw`). Register it in

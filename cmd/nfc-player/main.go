@@ -1,5 +1,5 @@
 // Command nfc-player is the NFC Player Home Assistant app: it plays music when
-// an NFC tag is scanned and serves the UI for the tag registry and labels.
+// an NFC tag is scanned and serves the UI for records and labels.
 //
 // main only parses flags and loads config; run wires the components so the
 // end-to-end test can start the whole app.
@@ -24,15 +24,13 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/config"
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
-	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	_ "github.com/igrybkov/ha-nfc-player/internal/labels/layouts" // registers "side" and "full"
 	"github.com/igrybkov/ha-nfc-player/internal/migrate"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 	"github.com/igrybkov/ha-nfc-player/internal/player"
 	"github.com/igrybkov/ha-nfc-player/internal/player/musicassistant"
 	"github.com/igrybkov/ha-nfc-player/internal/player/sonos"
-	"github.com/igrybkov/ha-nfc-player/internal/pools"
-	"github.com/igrybkov/ha-nfc-player/internal/registry"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/rooms"
 	"github.com/igrybkov/ha-nfc-player/internal/scan"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
@@ -113,15 +111,14 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	// first save, so nothing is written to config_dir until the user saves.
 	// Files of an older schema are migrated in memory; see package migrate.
 	files := migrate.Open(cfg.ConfigDir, log)
-	tags := registry.New(store.In(files, config.TagsFile, registry.DefaultTagsFile))
-	poolStore := pools.New(store.In(files, config.PoolsFile, pools.DefaultFile), tags)
-	settings := config.NewSettingsStore(store.In(files, config.SettingsFile, model.DefaultSettings))
-	templates, err := config.NewTemplateStore(store.In(files, config.TemplatesFile, emptyList[labels.Template]))
+	recs := records.New(store.In(files, records.FileName, records.DefaultFile))
+	settings := config.NewSettingsStore(store.In(files, config.SettingsFileName, model.DefaultSettings))
+	templates, err := config.NewTemplateStore(store.In(files, config.TemplatesFileName, config.DefaultTemplatesFile))
 	if err != nil {
 		ln.Close()
 		return err
 	}
-	backgrounds, err := config.NewBackgroundStore(store.In(files, config.BackgroundsFile, emptyList[labels.Background]))
+	backgrounds, err := config.NewBackgroundStore(store.In(files, config.BackgroundsFileName, config.DefaultBackgroundsFile))
 	if err != nil {
 		ln.Close()
 		return err
@@ -135,7 +132,7 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	router := player.NewRouter(settings, ma, sonos.New(client, &catalog.ITunes{}), ma)
 	scans := scan.NewRing(scan.LogSize)
 	handler := scan.New(scan.Deps{
-		HA: client, Entries: tags, Pools: poolStore, Settings: settings, Rooms: resolver,
+		HA: client, Records: recs, Settings: settings, Rooms: resolver,
 		Router: router, Log: scans, Logger: log,
 	})
 
@@ -145,11 +142,9 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 		cache := &artwork.Cache{Dir: filepath.Join(cfg.DataDir, "cache"), ConfigDir: cfg.ConfigDir, Logger: log}
 		art, picker = cache, cache
 	}
-	// A pool tag shows the art of its pool's first item.
-	art = &pools.Artwork{Pools: poolStore, Source: art}
 
 	srv := web.New(web.Deps{
-		Registry: tags, Pools: poolStore, Settings: settings, Templates: templates, Backgrounds: backgrounds,
+		Records: recs, Settings: settings, Templates: templates, Backgrounds: backgrounds,
 		Play: handler, Scans: scans, Artwork: art, HATags: client, ArtPicker: picker,
 		Supervisor: cfg.Supervisor, Logger: log,
 	})
@@ -213,8 +208,6 @@ func runScans(ctx context.Context, h *scan.Handler, log *slog.Logger) {
 		}
 	}
 }
-
-func emptyList[T any]() []T { return []T{} }
 
 // checkHealth GETs /healthz on the loopback port of listen (LISTEN, default
 // config.DefaultListen). Only the port is used: the server may listen on all

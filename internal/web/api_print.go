@@ -18,14 +18,13 @@ import (
 
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
-	"github.com/igrybkov/ha-nfc-player/internal/pools"
 )
 
 // printRequest is the body of api/print/preview and api/print/pdf. The server
 // fills the template, background, offsets and bleed values from storage, so
 // the UI sends ids only.
 type printRequest struct {
-	EntryIDs []string `json:"entry_ids"`
+	RecordIDs []string `json:"record_ids"`
 	// Sample adds placeholder labels without art, for template previews.
 	Sample       int              `json:"sample"`
 	TemplateID   string           `json:"template_id"`
@@ -53,17 +52,17 @@ type previewResponse struct {
 	Rows   int                  `json:"rows"`
 	Labels int                  `json:"labels"`
 	Pages  [][]labels.SlotState `json:"pages"`
-	// MissingArt lists the picked entries that would print without art.
+	// MissingArt lists the picked records that would print without art.
 	// Empty for outline previews, which print no art.
-	MissingArt []entryRef `json:"missing_art"`
+	MissingArt []recordRef `json:"missing_art"`
 }
 
-type entryRef struct {
+type recordRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-// missingArtHeader carries, on the PDF, the number of picked entries that
+// missingArtHeader carries, on the PDF, the number of picked records that
 // printed without art. Each of them printed once per copy.
 const missingArtHeader = "X-Missing-Art"
 
@@ -73,23 +72,23 @@ func (s *Server) printPreview(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, r, err)
 		return
 	}
-	job, entries, err := s.buildJob(req)
+	job, subs, err := s.buildJob(req)
 	if err != nil {
 		s.writeErr(w, r, err)
 		return
 	}
-	job.Items = s.items(entries, req.Sample, nil)
+	job.Items = s.items(subs, req.Sample, nil)
 	pages := s.lbl.SheetMap(job.Template, job)
 	if pages == nil {
 		pages = [][]labels.SlotState{}
 	}
 	// Art comes from the same source and timeouts as the PDF, so the
 	// warning matches what prints. Cached art makes repeat previews cheap.
-	missing := []entryRef{}
-	if !req.Outline && len(entries) > 0 {
+	missing := []recordRef{}
+	if !req.Outline && len(subs) > 0 {
 		ctx, cancel := context.WithTimeout(r.Context(), printTimeout)
 		defer cancel()
-		missing = missingArt(entries, s.fetchArt(ctx, entries))
+		missing = missingArt(subs, s.fetchArt(ctx, subs))
 	}
 	writeJSON(w, http.StatusOK, previewResponse{
 		Cols:       job.Template.Grid.Cols,
@@ -100,12 +99,12 @@ func (s *Server) printPreview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// missingArt lists the entries whose art is nil. art is parallel to entries.
-func missingArt(entries []model.Entry, art []image.Image) []entryRef {
-	out := []entryRef{}
-	for i, e := range entries {
+// missingArt lists the records whose art is nil. art is parallel to subs.
+func missingArt(subs []model.Subject, art []image.Image) []recordRef {
+	out := []recordRef{}
+	for i, sub := range subs {
 		if art[i] == nil {
-			out = append(out, entryRef{ID: e.ID, Name: e.Name})
+			out = append(out, recordRef{ID: sub.ID, Name: sub.Name})
 		}
 	}
 	return out
@@ -120,7 +119,7 @@ func (s *Server) printPDF(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, r, err)
 		return
 	}
-	job, entries, err := s.buildJob(req)
+	job, subs, err := s.buildJob(req)
 	if err != nil {
 		s.writeErr(w, r, err)
 		return
@@ -130,9 +129,9 @@ func (s *Server) printPDF(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var art []image.Image
 	if !req.Outline {
-		art = s.fetchArt(ctx, entries)
+		art = s.fetchArt(ctx, subs)
 	}
-	job.Items = s.items(entries, req.Sample, art)
+	job.Items = s.items(subs, req.Sample, art)
 
 	var buf bytes.Buffer
 	if err := s.lbl.Render(&buf, job); err != nil {
@@ -140,10 +139,10 @@ func (s *Server) printPDF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !req.Outline {
-		w.Header().Set(missingArtHeader, strconv.Itoa(len(missingArt(entries, art))))
+		w.Header().Set(missingArtHeader, strconv.Itoa(len(missingArt(subs, art))))
 	}
 	w.Header().Set("Content-Type", "application/pdf")
-	ascii, utf := pdfNames(job, req.EntryIDs)
+	ascii, utf := pdfNames(job, req.RecordIDs)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.pdf"; filename*=UTF-8''%s.pdf`, ascii, url.PathEscape(utf)))
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(buf.Bytes())
@@ -168,7 +167,7 @@ func (s *Server) readPrintRequest(w http.ResponseWriter, r *http.Request) (print
 
 // buildJob resolves ids against storage and checks the numbers. Items are
 // filled by the caller, since only the PDF needs art.
-func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
+func (s *Server) buildJob(req printRequest) (labels.Job, []model.Subject, error) {
 	var job labels.Job
 
 	switch {
@@ -197,13 +196,13 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 	}
 	job.Background = bg
 
-	entries := make([]model.Entry, 0, len(req.EntryIDs))
-	for _, id := range req.EntryIDs {
-		e, err := s.printEntry(id)
+	subs := make([]model.Subject, 0, len(req.RecordIDs))
+	for _, id := range req.RecordIDs {
+		rec, err := s.deps.Records.Get(id)
 		if err != nil {
 			return job, nil, err
 		}
-		entries = append(entries, e)
+		subs = append(subs, s.deps.Records.Subject(rec))
 	}
 
 	job.Copies = max(req.Copies, 1)
@@ -224,10 +223,10 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 		return job, nil, badRequest("start_col must be 1..%d", g.Cols)
 	case (job.StartRow-1)*g.Cols+job.StartCol-1+job.Skip >= g.Cols*g.Rows:
 		return job, nil, badRequest("start slot plus skip leaves no free slot on the first sheet")
-	case (len(entries)+req.Sample)*job.Copies > maxLabels:
+	case (len(subs)+req.Sample)*job.Copies > maxLabels:
 		return job, nil, badRequest("at most %d labels per job", maxLabels)
-	case len(entries)+req.Sample == 0:
-		return job, nil, badRequest("pick at least one entry")
+	case len(subs)+req.Sample == 0:
+		return job, nil, badRequest("pick at least one record")
 	}
 
 	settings := s.deps.Settings.Settings()
@@ -241,32 +240,19 @@ func (s *Server) buildJob(req printRequest) (labels.Job, []model.Entry, error) {
 	job.EdgeBleedMM = settings.Print.EdgeBleedMM
 	job.OuterBleedMM = settings.Print.OuterBleed()
 	job.Outline = req.Outline
-	return job, entries, nil
+	return job, subs, nil
 }
 
-// printEntry resolves one id of a print job: an entry id, or a pool as
-// pools.RefPrefix + its id. A pool prints under its own name and art.
-func (s *Server) printEntry(id string) (model.Entry, error) {
-	if pid, ok := strings.CutPrefix(id, pools.RefPrefix); ok {
-		p, found := s.deps.Pools.Pool(pid)
-		if !found {
-			return model.Entry{}, fmt.Errorf("%w: no pool %q", pools.ErrNotFound, pid)
-		}
-		return pools.AsEntry(p), nil
-	}
-	return s.deps.Registry.Get(id)
-}
-
-// items builds the labels: entries first, then sample placeholders. art is
-// parallel to entries and may be nil.
-func (*Server) items(entries []model.Entry, sample int, art []image.Image) []labels.Item {
-	out := make([]labels.Item, 0, len(entries)+sample)
-	for i, e := range entries {
+// items builds the labels: records first, then sample placeholders. art is
+// parallel to subs and may be nil.
+func (*Server) items(subs []model.Subject, sample int, art []image.Image) []labels.Item {
+	out := make([]labels.Item, 0, len(subs)+sample)
+	for i, sub := range subs {
 		var img image.Image
 		if i < len(art) {
 			img = art[i]
 		}
-		out = append(out, labels.ItemFromEntry(e, img))
+		out = append(out, labels.ItemFromSubject(sub, img))
 	}
 	for range sample {
 		out = append(out, labels.Item{Title: "Artist", Subtitle: "Album title"})
@@ -274,13 +260,13 @@ func (*Server) items(entries []model.Entry, sample int, art []image.Image) []lab
 	return out
 }
 
-// fetchArt loads art for each entry with limited parallelism. A failure
+// fetchArt loads art for each record with limited parallelism. A failure
 // leaves that label without art: one missing cover must not block a sheet.
-func (s *Server) fetchArt(ctx context.Context, entries []model.Entry) []image.Image {
-	art := make([]image.Image, len(entries))
+func (s *Server) fetchArt(ctx context.Context, subs []model.Subject) []image.Image {
+	art := make([]image.Image, len(subs))
 	sem := make(chan struct{}, artParallel)
 	var wg sync.WaitGroup
-	for i, e := range entries {
+	for i, sub := range subs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -288,9 +274,9 @@ func (s *Server) fetchArt(ctx context.Context, entries []model.Entry) []image.Im
 			defer func() { <-sem }()
 			actx, cancel := context.WithTimeout(ctx, artworkTimeout)
 			defer cancel()
-			img, err := s.deps.Artwork.Artwork(actx, e, false)
+			img, err := s.deps.Artwork.Artwork(actx, sub, false)
 			if err != nil {
-				s.log.Warn("web: artwork for print", "entry", e.ID, "err", err)
+				s.log.Warn("web: artwork for print", "record", sub.ID, "err", err)
 				return
 			}
 			art[i] = img
@@ -325,18 +311,18 @@ const (
 // pdfNames returns the PDF file name without ".pdf", in ASCII and in UTF-8:
 // the label titles in print order, slugged, each cut to its share of
 // pdfNameLen (see shares), joined and cut to pdfNameLen,
-// then an 8-character hash of the entries and the print settings, so two
+// then an 8-character hash of the records and the print settings, so two
 // different runs of the same labels get different names. The ASCII name drops
 // letters outside a-z (a Cyrillic title vanishes); "labels" stands in when
 // nothing is left.
-func pdfNames(job labels.Job, entryIDs []string) (ascii, utf string) {
+func pdfNames(job labels.Job, recordIDs []string) (ascii, utf string) {
 	var titles []string
 	for _, it := range job.Items {
 		titles = append(titles, it.Title)
 	}
 	h := sha256.New()
 	fmt.Fprintf(h, "%q|%q|%s|%s|%d|%d|%d|%d|%g|%g|%t",
-		entryIDs, titles, job.Template.ID, job.Background.ID, job.Copies,
+		recordIDs, titles, job.Template.ID, job.Background.ID, job.Copies,
 		job.StartRow, job.StartCol, job.Skip, job.Offset.XMM, job.Offset.YMM, job.Outline)
 	hash := strings.ToLower(base32.StdEncoding.EncodeToString(h.Sum(nil)))[:8]
 

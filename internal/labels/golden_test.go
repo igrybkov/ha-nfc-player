@@ -73,7 +73,7 @@ func TestGoldenRender(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, it.File), buf.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		items = append(items, labels.ItemFromEntry(model.Entry{Name: it.Name}, img))
+		items = append(items, labels.ItemFromSubject(model.Subject{Name: it.Name}, img))
 	}
 	for _, c := range goldenCases {
 		job := labels.Job{

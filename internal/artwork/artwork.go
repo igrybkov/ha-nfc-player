@@ -1,15 +1,16 @@
-// Package artwork resolves, downloads, caches and square-crops entry artwork.
+// Package artwork resolves, downloads, caches and square-crops artwork for a
+// model.Subject: a record, or one media item of it.
 //
 // The resolution chain is a port of
 // docs/reference/nfc-music-labels.py:
 //
-//  1. The entry's label.artwork override: an http(s) URL, or a file path
+//  1. The subject's label.artwork override: an http(s) URL, or a file path
 //     under ConfigDir. It is never written to the index.
 //  2. The art URL found on an earlier run, from artwork.json.
-//  3. For a Spotify entry URL: the Spotify oEmbed thumbnail, with the size
+//  3. For a Spotify subject URL: the Spotify oEmbed thumbnail, with the size
 //     marker in the image id swapped for the 640px one. The Apple steps
 //     below are skipped for it.
-//  4. For any other entry URL: the iTunes lookup for an album id
+//  4. For any other subject URL: the iTunes lookup for an album id
 //     (artworkUrl100 with the size swapped to 1200x1200), then the page's
 //     og:image with the last path segment swapped to 1200x1200bb.jpg. Both
 //     run for any URL, since albums get pulled from Apple Music and the lookup
@@ -127,8 +128,8 @@ type Cache struct {
 	mu sync.Mutex // serializes artwork.json read-modify-write
 
 	flightMu sync.Mutex
-	flights  map[string]*flight   // resolutions in progress, by entry key
-	failed   map[string]time.Time // when the chain last found nothing, by entry key
+	flights  map[string]*flight   // resolutions in progress, by subject key
+	failed   map[string]time.Time // when the chain last found nothing, by subject key
 	now      func() time.Time     // clock; tests replace it
 
 	candMu    sync.Mutex
@@ -146,45 +147,45 @@ type flight struct {
 
 var _ model.ArtworkSource = (*Cache)(nil)
 
-// Artwork returns square art for e. refresh skips the index entry and the
-// cached image file for this entry, and stores the new ones.
-func (c *Cache) Artwork(ctx context.Context, e model.Entry, refresh bool) (image.Image, error) {
+// Artwork returns square art for sub. refresh skips the index entry and the
+// cached image file for this subject, and stores the new ones.
+func (c *Cache) Artwork(ctx context.Context, sub model.Subject, refresh bool) (image.Image, error) {
 	var img image.Image
 	var err error
-	switch override := overrideOf(e); {
+	switch override := overrideOf(sub); {
 	case override != "" && !isHTTP(override):
 		img, err = c.loadFile(override)
 	case override != "":
 		img, err = c.loadURL(ctx, override, refresh, false)
 	default:
-		img, err = c.resolveAndLoad(ctx, e, refresh)
+		img, err = c.resolveAndLoad(ctx, sub, refresh)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("artwork for %q: %w", e.Name, err)
+		return nil, fmt.Errorf("artwork for %q: %w", sub.Name, err)
 	}
 	return cropSquare(img), nil
 }
 
-// ResolveURL finds the art URL for e (override, Spotify oEmbed or iTunes
+// ResolveURL finds the art URL for sub (override, Spotify oEmbed or iTunes
 // lookup and og:image, search). It does not use or update the index. A path override is returned
 // as given. It returns ErrNotFound only when every step ran cleanly; if a
 // step hit a transient error and no later step found art, that error is
 // returned instead.
-func (c *Cache) ResolveURL(ctx context.Context, e model.Entry) (string, error) {
-	if override := overrideOf(e); override != "" {
+func (c *Cache) ResolveURL(ctx context.Context, sub model.Subject) (string, error) {
+	if override := overrideOf(sub); override != "" {
 		return override, nil
 	}
 	var steps []func() (string, error)
-	if m, err := catalog.Parse(e.URL); err == nil && m.IsSpotify() {
+	if m, err := catalog.Parse(sub.URL); err == nil && m.IsSpotify() {
 		// Not the Apple steps: the album regex would read the leading digits
 		// of a base62 id, and og:image is not Apple's image URL scheme.
 		steps = append(steps, func() (string, error) { return c.spotifyArtwork(ctx, m) })
-	} else if e.URL != "" {
+	} else if sub.URL != "" {
 		steps = append(steps,
-			func() (string, error) { return c.albumArtwork(ctx, e.URL) },
-			func() (string, error) { return c.pageArtwork(ctx, e.URL) })
+			func() (string, error) { return c.albumArtwork(ctx, sub.URL) },
+			func() (string, error) { return c.pageArtwork(ctx, sub.URL) })
 	}
-	steps = append(steps, func() (string, error) { return c.searchArtwork(ctx, e.Name) })
+	steps = append(steps, func() (string, error) { return c.searchArtwork(ctx, sub.Name) })
 	var transient error
 	for _, step := range steps {
 		found, err := step()
@@ -192,7 +193,7 @@ func (c *Cache) ResolveURL(ctx context.Context, e model.Entry) (string, error) {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			c.logger().Warn("artwork lookup failed", "name", e.Name, "error", err)
+			c.logger().Warn("artwork lookup failed", "name", sub.Name, "error", err)
 			if transient == nil && isTransient(err) {
 				transient = err
 			}
@@ -208,8 +209,8 @@ func (c *Cache) ResolveURL(ctx context.Context, e model.Entry) (string, error) {
 	return "", ErrNotFound
 }
 
-func (c *Cache) resolveAndLoad(ctx context.Context, e model.Entry, refresh bool) (image.Image, error) {
-	key := e.Name + "\n" + e.URL
+func (c *Cache) resolveAndLoad(ctx context.Context, sub model.Subject, refresh bool) (image.Image, error) {
+	key := sub.Name + "\n" + sub.URL
 	source := ""
 	if !refresh {
 		index, err := c.readIndex()
@@ -221,7 +222,7 @@ func (c *Cache) resolveAndLoad(ctx context.Context, e model.Entry, refresh bool)
 	fromIndex := source != ""
 	if !fromIndex {
 		var err error
-		if source, err = c.resolveKey(ctx, e, key, refresh); err != nil {
+		if source, err = c.resolveKey(ctx, sub, key, refresh); err != nil {
 			return nil, err
 		}
 	}
@@ -230,7 +231,7 @@ func (c *Cache) resolveAndLoad(ctx context.Context, e model.Entry, refresh bool)
 		return img, err
 	}
 	// Apple pulled the art the index points to. Forget it and look again once.
-	c.logger().Info("indexed artwork is gone; resolving again", "name", e.Name, "url", source, "error", err)
+	c.logger().Info("indexed artwork is gone; resolving again", "name", sub.Name, "url", source, "error", err)
 	if err := c.updateIndex(func(index map[string]string) {
 		if index[key] == source {
 			delete(index, key)
@@ -238,19 +239,19 @@ func (c *Cache) resolveAndLoad(ctx context.Context, e model.Entry, refresh bool)
 	}); err != nil {
 		c.logger().Warn("artwork index not saved", "error", err)
 	}
-	if source, err = c.resolveKey(ctx, e, key, false); err != nil {
+	if source, err = c.resolveKey(ctx, sub, key, false); err != nil {
 		return nil, err
 	}
 	return c.loadURL(ctx, source, refresh, true)
 }
 
-// resolveKey runs the lookup chain for an entry key and stores the result in
+// resolveKey runs the lookup chain for a subject key and stores the result in
 // the index. Unless refresh is set, a recent miss returns ErrNotFound with no
 // network, and a caller arriving while a lookup for the key runs waits for
 // that one. Waiters share the leader's result, including its context error.
-func (c *Cache) resolveKey(ctx context.Context, e model.Entry, key string, refresh bool) (string, error) {
+func (c *Cache) resolveKey(ctx context.Context, sub model.Subject, key string, refresh bool) (string, error) {
 	if refresh {
-		return c.resolveAndRecord(ctx, e, key)
+		return c.resolveAndRecord(ctx, sub, key)
 	}
 	c.flightMu.Lock()
 	if at, ok := c.failed[key]; ok {
@@ -277,7 +278,7 @@ func (c *Cache) resolveKey(ctx context.Context, e model.Entry, key string, refre
 	c.flights[key] = f
 	c.flightMu.Unlock()
 
-	f.url, f.err = c.resolveAndRecord(ctx, e, key)
+	f.url, f.err = c.resolveAndRecord(ctx, sub, key)
 
 	c.flightMu.Lock()
 	delete(c.flights, key)
@@ -288,8 +289,8 @@ func (c *Cache) resolveKey(ctx context.Context, e model.Entry, key string, refre
 
 // resolveAndRecord runs the chain, saves a hit in the index and remembers a
 // clean miss in memory. Context and transient errors are not misses.
-func (c *Cache) resolveAndRecord(ctx context.Context, e model.Entry, key string) (string, error) {
-	source, err := c.ResolveURL(ctx, e)
+func (c *Cache) resolveAndRecord(ctx context.Context, sub model.Subject, key string) (string, error) {
+	source, err := c.ResolveURL(ctx, sub)
 	c.flightMu.Lock()
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -318,11 +319,11 @@ func (c *Cache) clock() time.Time {
 }
 
 // overrideOf returns the trimmed label.artwork override, or "".
-func overrideOf(e model.Entry) string {
-	if e.Label.Artwork == nil {
+func overrideOf(sub model.Subject) string {
+	if sub.Label.Artwork == nil {
 		return ""
 	}
-	return strings.TrimSpace(*e.Label.Artwork)
+	return strings.TrimSpace(*sub.Label.Artwork)
 }
 
 func isHTTP(s string) bool {

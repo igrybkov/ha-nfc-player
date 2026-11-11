@@ -14,14 +14,14 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
-	"github.com/igrybkov/ha-nfc-player/internal/pools"
-	"github.com/igrybkov/ha-nfc-player/internal/registry"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 )
 
-// TagLister lists and renames HA tags. ha.WSClient satisfies it.
+// TagLister lists, renames and deletes HA tags. ha.WSClient satisfies it.
 type TagLister interface {
 	Tags(ctx context.Context) ([]ha.Tag, error)
 	RenameTag(ctx context.Context, tagID, name string) error
+	DeleteTag(ctx context.Context, tagID string) error
 }
 
 // Labels is the part of the label engine the server uses. Nil in Deps means
@@ -35,8 +35,7 @@ type Labels interface {
 
 // Deps are the collaborators of the server.
 type Deps struct {
-	Registry    *registry.Registry
-	Pools       *pools.Store
+	Records     *records.Store
 	Settings    *config.SettingsStore
 	Templates   *config.TemplateStore
 	Backgrounds *config.BackgroundStore
@@ -97,26 +96,21 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	mux.HandleFunc("GET /api/tags", s.listTags)
-	mux.HandleFunc("POST /api/tags", s.createTag)
-	mux.HandleFunc("PUT /api/tags/{id}", s.updateTag)
-	mux.HandleFunc("DELETE /api/tags/{id}", s.deleteTag)
-	mux.HandleFunc("POST /api/tags/{id}/play", s.playTag)
-	mux.HandleFunc("GET /api/tags/{id}/artwork", s.tagArtwork)
-
-	mux.HandleFunc("GET /api/pools", s.listPools)
-	mux.HandleFunc("POST /api/pools", s.createPool)
-	mux.HandleFunc("PUT /api/pools/{id}", s.updatePool)
-	mux.HandleFunc("DELETE /api/pools/{id}", s.deletePool)
-	mux.HandleFunc("GET /api/pools/{id}/artwork", s.poolArtwork)
-	mux.HandleFunc("GET /api/pools/{id}/artwork/candidates", s.needPicker(s.poolArtCandidates))
-	mux.HandleFunc("GET /api/tags/{id}/artwork/candidates", s.needPicker(s.tagArtCandidates))
+	mux.HandleFunc("GET /api/records", s.listRecords)
+	mux.HandleFunc("POST /api/records", s.createRecord)
+	mux.HandleFunc("PUT /api/records/{id}", s.updateRecord)
+	mux.HandleFunc("DELETE /api/records/{id}", s.deleteRecord)
+	mux.HandleFunc("POST /api/records/{id}/play", s.playRecord)
+	mux.HandleFunc("GET /api/records/{id}/artwork", s.recordArtwork)
+	mux.HandleFunc("GET /api/records/{id}/artwork/candidates", s.needPicker(s.recordArtCandidates))
+	mux.HandleFunc("GET /api/artwork/media", s.mediaArtwork)
 	mux.HandleFunc("GET /api/artwork/preview", s.needPicker(s.artPreview))
 	mux.HandleFunc("POST /api/play", s.play)
 	mux.HandleFunc("POST /api/stop", s.stop)
 
 	mux.HandleFunc("GET /api/ha/tags", s.haTags)
 	mux.HandleFunc("PUT /api/ha/tags/{id}", s.renameHATag)
+	mux.HandleFunc("DELETE /api/ha/tags/{id}", s.deleteHATag)
 	mux.HandleFunc("GET /api/ha/areas", s.haAreas)
 	mux.HandleFunc("GET /api/scans", s.scans)
 

@@ -1,4 +1,4 @@
-// Package scan handles tag_scanned events (event, entry, room, router) and
+// Package scan handles tag_scanned events (event, record, room, router) and
 // the nfc_player_play / nfc_player_stop events. It also implements
 // model.ScanLog and model.PlayService.
 package scan
@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 	"github.com/igrybkov/ha-nfc-player/internal/player"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/rooms"
 )
 
@@ -47,8 +47,7 @@ const (
 // Deps are the collaborators of a Handler.
 type Deps struct {
 	HA       ha.Client
-	Entries  model.EntryLookup
-	Pools    model.PoolLookup // nil = every pool is unknown
+	Records  *records.Store
 	Settings model.SettingsSource
 	Rooms    *rooms.Resolver
 	Router   *player.Router
@@ -67,14 +66,10 @@ type Handler struct {
 	deps        Deps
 	log         *slog.Logger
 	now         func() time.Time // clock; tests replace it
-	intn        func(n int) int  // pool picks; tests replace it
 	areaTimeout time.Duration
 
 	mu        sync.Mutex
 	areaLocks map[string]chan struct{} // one-slot semaphores, so a wait can give up on ctx
-
-	pickMu   sync.Mutex
-	lastPick map[string]model.PoolItem // pool id → last item picked
 }
 
 var _ model.PlayService = (*Handler)(nil)
@@ -89,10 +84,8 @@ func New(d Deps) *Handler {
 		deps:        d,
 		log:         log.With("component", "scan"),
 		now:         time.Now,
-		intn:        rand.IntN,
 		areaTimeout: areaTimeout,
 		areaLocks:   make(map[string]chan struct{}),
-		lastPick:    make(map[string]model.PoolItem),
 	}
 }
 
@@ -261,7 +254,7 @@ func (h *Handler) enqueue(ctx context.Context, key string, item queued, workers 
 }
 
 // handle drops an event older than MaxScanAge. It runs a command, or
-// matches a scan to an entry, or to the "Artist — Album" search fallback,
+// matches a scan to a record, or to the "Artist — Album" search fallback,
 // and plays it.
 func (h *Handler) handle(ctx context.Context, item queued) {
 	s := item.scan
@@ -283,23 +276,10 @@ func (h *Handler) handle(ctx context.Context, item queued) {
 	if s.TagName == "" && s.TagID != "" {
 		s.TagName = h.tagName(ctx, s.TagID)
 	}
-	if e, ok := h.match(s); ok {
-		s.EntryID = e.ID
-		name, j, err := h.playEntry(ctx, e, s.AreaID)
-		s.PoolID, s.Media = j.poolID, j.text
-		if j.poolID != "" && j.entryID != "" {
-			s.Media = j.entryID // the pool picked a tag item; EntryID stays the scanned tag
-		}
-		h.recordPlay(s, name, err)
-		return
-	}
-	if p, ok := h.poolByName(s.TagName); ok {
-		// A tag named like a pool plays it, as a tag set to that pool would.
-		name, j, err := h.playEntry(ctx, model.Entry{Name: s.TagName, Pool: p.ID}, s.AreaID)
-		s.PoolID, s.Media = p.ID, j.text
-		if j.entryID != "" {
-			s.Media = j.entryID
-		}
+	if r, ok := h.match(s); ok {
+		s.RecordID = r.ID
+		name, j, err := h.playRecord(ctx, r.ID, s.AreaID)
+		s.Media = j.text
 		h.recordPlay(s, name, err)
 		return
 	}
@@ -316,25 +296,11 @@ func (h *Handler) handle(ctx context.Context, item queued) {
 	h.recordPlay(s, name, err)
 }
 
-// poolByName finds the pool a tag name names, if any.
-func (h *Handler) poolByName(tagName string) (model.Pool, bool) {
-	if h.deps.Pools == nil {
-		return model.Pool{}, false
-	}
-	return h.deps.Pools.ByName(model.NormalizeName(tagName))
-}
-
-// match finds the entry: tag ID first, then normalized name.
-func (h *Handler) match(s model.Scan) (model.Entry, bool) {
-	if s.TagID != "" {
-		if e, ok := h.deps.Entries.ByTagID(s.TagID); ok {
-			return e, true
-		}
-	}
-	if key := model.NormalizeName(s.TagName); key != "" {
-		return h.deps.Entries.ByName(key)
-	}
-	return model.Entry{}, false
+// match finds the record a scanned tag plays, by its normalized name.
+// Records don't know tag ids: renaming a tag in HA moves it to another
+// record.
+func (h *Handler) match(s model.Scan) (model.Record, bool) {
+	return h.deps.Records.ByName(model.NormalizeName(s.TagName))
 }
 
 // tagName looks the name up in the tag registry, for events without one.
@@ -364,16 +330,17 @@ func ParseQuery(name string) (player.Query, bool) {
 	return q, q.Artist != "" && q.Album != ""
 }
 
-// PlayEntry plays an entry in an area: its URL, or an item of its pool. It
-// waits for any other playback in that area to finish first.
-func (h *Handler) PlayEntry(ctx context.Context, entry model.Entry, areaID string) (string, error) {
-	name, _, err := h.playEntry(ctx, entry, areaID)
+// PlayRecord plays a record in an area, as a tag scan would: one item
+// picked, with the record's settings. It waits for any other playback in
+// that area to finish first. It is not recorded in the ScanLog.
+func (h *Handler) PlayRecord(ctx context.Context, id, areaID string) (string, error) {
+	name, _, err := h.playRecord(ctx, id, areaID)
 	return name, err
 }
 
-// playEntry is PlayEntry that also returns the resolved job, for the scan log.
-func (h *Handler) playEntry(ctx context.Context, entry model.Entry, areaID string) (string, job, error) {
-	j, err := h.entryJob(entry)
+// playRecord is PlayRecord that also returns the resolved job, for the scan log.
+func (h *Handler) playRecord(ctx context.Context, id, areaID string) (string, job, error) {
+	j, err := h.recordJob(id)
 	if err != nil {
 		return "", j, err
 	}
@@ -439,8 +406,8 @@ func (h *Handler) recordPlay(s model.Scan, playerName string, err error) {
 
 func (h *Handler) record(s model.Scan, result model.ScanResult, playerName string, err error) {
 	s.Result, s.Player = result, playerName
-	attrs := []any{"source", s.Source, "tag_id", s.TagID, "tag_name", s.TagName, "device_id", s.DeviceID, "area_id", s.AreaID, "entry_id", s.EntryID, "result", result}
-	for _, kv := range [][2]string{{"entity", s.Entity}, {"pool_id", s.PoolID}, {"media", s.Media}, {"player", playerName}} {
+	attrs := []any{"source", s.Source, "tag_id", s.TagID, "tag_name", s.TagName, "device_id", s.DeviceID, "area_id", s.AreaID, "record_id", s.RecordID, "result", result}
+	for _, kv := range [][2]string{{"entity", s.Entity}, {"media", s.Media}, {"player", playerName}} {
 		if kv[1] != "" {
 			attrs = append(attrs, kv[0], kv[1])
 		}

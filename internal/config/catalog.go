@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
-	"github.com/igrybkov/ha-nfc-player/internal/registry"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
 
@@ -19,21 +19,42 @@ var (
 	ErrReadOnly  = errors.New("built-in, read-only")
 )
 
+// TemplatesFile is the content of templates.yaml: the user templates.
+type TemplatesFile struct {
+	Version   int               `yaml:"version" json:"version"`
+	Templates []labels.Template `yaml:"templates" json:"templates"`
+}
+
+// DefaultTemplatesFile is the content of a new templates.yaml.
+func DefaultTemplatesFile() TemplatesFile { return TemplatesFile{Templates: []labels.Template{}} }
+
+// BackgroundsFile is the content of backgrounds.yaml: the user backgrounds.
+type BackgroundsFile struct {
+	Version     int                 `yaml:"version" json:"version"`
+	Backgrounds []labels.Background `yaml:"backgrounds" json:"backgrounds"`
+}
+
+// DefaultBackgroundsFile is the content of a new backgrounds.yaml.
+func DefaultBackgroundsFile() BackgroundsFile {
+	return BackgroundsFile{Backgrounds: []labels.Background{}}
+}
+
 // TemplateStore serves label templates: the embedded built-ins plus the user
 // templates in templates.yaml. Built-ins are read-only.
 type TemplateStore struct {
-	catalog[labels.Template]
+	catalog[TemplatesFile, labels.Template]
 }
 
 // NewTemplateStore returns a TemplateStore on f (user templates only).
-// Open f with an empty-list default.
-func NewTemplateStore(f *store.File[[]labels.Template]) (*TemplateStore, error) {
+// Open f with DefaultTemplatesFile as the default.
+func NewTemplateStore(f *store.File[TemplatesFile]) (*TemplateStore, error) {
 	builtins, err := labels.BuiltinTemplates()
 	if err != nil {
 		return nil, fmt.Errorf("built-in templates: %w", err)
 	}
-	return &TemplateStore{catalog[labels.Template]{
+	return &TemplateStore{catalog[TemplatesFile, labels.Template]{
 		file:     f,
+		list:     func(f *TemplatesFile) *[]labels.Template { return &f.Templates },
 		builtins: builtins,
 		fields:   func(t *labels.Template) (*string, *string, *bool) { return &t.ID, &t.Name, &t.Builtin },
 		validate: labels.Template.Validate,
@@ -43,37 +64,40 @@ func NewTemplateStore(f *store.File[[]labels.Template]) (*TemplateStore, error) 
 // BackgroundStore serves label backgrounds: the embedded built-ins plus the
 // user backgrounds in backgrounds.yaml. Built-ins are read-only.
 type BackgroundStore struct {
-	catalog[labels.Background]
+	catalog[BackgroundsFile, labels.Background]
 }
 
 // NewBackgroundStore returns a BackgroundStore on f (user backgrounds only).
-// Open f with an empty-list default.
-func NewBackgroundStore(f *store.File[[]labels.Background]) (*BackgroundStore, error) {
+// Open f with DefaultBackgroundsFile as the default.
+func NewBackgroundStore(f *store.File[BackgroundsFile]) (*BackgroundStore, error) {
 	builtins, err := labels.BuiltinBackgrounds()
 	if err != nil {
 		return nil, fmt.Errorf("built-in backgrounds: %w", err)
 	}
-	return &BackgroundStore{catalog[labels.Background]{
+	return &BackgroundStore{catalog[BackgroundsFile, labels.Background]{
 		file:     f,
+		list:     func(f *BackgroundsFile) *[]labels.Background { return &f.Backgrounds },
 		builtins: builtins,
 		fields:   func(b *labels.Background) (*string, *string, *bool) { return &b.ID, &b.Name, &b.Builtin },
 		validate: labels.Background.Validate,
 	}}, nil
 }
 
-// catalog is the shared logic of TemplateStore and BackgroundStore.
-type catalog[T any] struct {
-	file     *store.File[[]T]
+// catalog is the shared logic of TemplateStore and BackgroundStore. F is
+// the file type; list points at its user items.
+type catalog[F, T any] struct {
+	file     *store.File[F]
+	list     func(*F) *[]T
 	builtins []T
 	fields   func(*T) (id, name *string, builtin *bool)
 	validate func(T) error // labels' Validate; tests swap it
 }
 
-func (c *catalog[T]) id(v T) string { id, _, _ := c.fields(&v); return *id }
+func (c *catalog[F, T]) id(v T) string { id, _, _ := c.fields(&v); return *id }
 
 // List returns the built-ins first, then the user items in file order.
 // A read error comes with the last good user items.
-func (c *catalog[T]) List() ([]T, error) {
+func (c *catalog[F, T]) List() ([]T, error) {
 	user, err := c.user()
 	out := make([]T, 0, len(c.builtins)+len(user))
 	out = append(out, c.builtins...)
@@ -81,7 +105,7 @@ func (c *catalog[T]) List() ([]T, error) {
 }
 
 // Get returns an item by id, built-in or user.
-func (c *catalog[T]) Get(id string) (T, error) {
+func (c *catalog[F, T]) Get(id string) (T, error) {
 	all, err := c.List()
 	if i := slices.IndexFunc(all, func(v T) bool { return c.id(v) == id }); i >= 0 {
 		return all[i], nil
@@ -94,15 +118,15 @@ func (c *catalog[T]) Get(id string) (T, error) {
 }
 
 // Create stores a new user item. An empty id is made from the name.
-func (c *catalog[T]) Create(v T) (T, error) {
+func (c *catalog[F, T]) Create(v T) (T, error) {
 	id, name, builtin := c.fields(&v)
 	*id, *name, *builtin = strings.TrimSpace(*id), strings.TrimSpace(*name), false
 	if *name == "" {
 		return v, fmt.Errorf("%w: name is required", ErrInvalid)
 	}
-	err := c.file.Update(func(user *[]T) error {
+	err := c.update(func(user *[]T) error {
 		if *id == "" {
-			*id = c.uniqueID(registry.Slug(*name), *user)
+			*id = c.uniqueID(records.Slug(*name), *user)
 		} else if c.taken(*id, *user) {
 			return fmt.Errorf("%w: %s", ErrDuplicate, *id)
 		}
@@ -116,7 +140,7 @@ func (c *catalog[T]) Create(v T) (T, error) {
 }
 
 // Update replaces a user item. The id does not change.
-func (c *catalog[T]) Update(id string, v T) (T, error) {
+func (c *catalog[F, T]) Update(id string, v T) (T, error) {
 	if c.isBuiltin(id) {
 		return v, fmt.Errorf("%w: %s", ErrReadOnly, id)
 	}
@@ -131,7 +155,7 @@ func (c *catalog[T]) Update(id string, v T) (T, error) {
 	if err := c.check(v); err != nil {
 		return v, err
 	}
-	err := c.file.Update(func(user *[]T) error {
+	err := c.update(func(user *[]T) error {
 		i := slices.IndexFunc(*user, func(u T) bool { return c.id(u) == id })
 		if i < 0 {
 			return fmt.Errorf("%w: %s", ErrNotFound, id)
@@ -143,11 +167,11 @@ func (c *catalog[T]) Update(id string, v T) (T, error) {
 }
 
 // Delete removes a user item.
-func (c *catalog[T]) Delete(id string) error {
+func (c *catalog[F, T]) Delete(id string) error {
 	if c.isBuiltin(id) {
 		return fmt.Errorf("%w: %s", ErrReadOnly, id)
 	}
-	return c.file.Update(func(user *[]T) error {
+	return c.update(func(user *[]T) error {
 		i := slices.IndexFunc(*user, func(u T) bool { return c.id(u) == id })
 		if i < 0 {
 			return fmt.Errorf("%w: %s", ErrNotFound, id)
@@ -159,8 +183,9 @@ func (c *catalog[T]) Delete(id string) error {
 
 // user loads the user items and drops any that collide with a built-in id
 // (a hand edit); built-ins win. Builtin is forced to false.
-func (c *catalog[T]) user() ([]T, error) {
-	items, err := c.file.Load()
+func (c *catalog[F, T]) user() ([]T, error) {
+	f, err := c.file.Load()
+	items := *c.list(&f)
 	out := items[:0]
 	for _, v := range items {
 		_, _, builtin := c.fields(&v)
@@ -172,22 +197,27 @@ func (c *catalog[T]) user() ([]T, error) {
 	return out, err
 }
 
-func (c *catalog[T]) check(v T) error {
+// update runs fn on the user items under the file lock.
+func (c *catalog[F, T]) update(fn func(user *[]T) error) error {
+	return c.file.Update(func(f *F) error { return fn(c.list(f)) })
+}
+
+func (c *catalog[F, T]) check(v T) error {
 	if err := c.validate(v); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	return nil
 }
 
-func (c *catalog[T]) isBuiltin(id string) bool {
+func (c *catalog[F, T]) isBuiltin(id string) bool {
 	return slices.ContainsFunc(c.builtins, func(b T) bool { return c.id(b) == id })
 }
 
-func (c *catalog[T]) taken(id string, user []T) bool {
+func (c *catalog[F, T]) taken(id string, user []T) bool {
 	return c.isBuiltin(id) || slices.ContainsFunc(user, func(u T) bool { return c.id(u) == id })
 }
 
-func (c *catalog[T]) uniqueID(base string, user []T) string {
+func (c *catalog[F, T]) uniqueID(base string, user []T) string {
 	id := base
 	for n := 2; c.taken(id, user); n++ {
 		id = base + "-" + strconv.Itoa(n)

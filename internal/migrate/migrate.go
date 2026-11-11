@@ -20,19 +20,20 @@ import (
 )
 
 // Current is the schema version this build reads and writes.
-const Current = 1
+const Current = 2
 
 // Files are the names of every file in config_dir, of every version.
 var Files = []string{
-	"tags.yaml",
-	"pools.yaml",
+	"tags.yaml",  // v1
+	"pools.yaml", // v1
+	"records.yaml",
 	"settings.yaml",
 	"templates.yaml",
 	"backgrounds.yaml",
 }
 
 // Steps takes version i+1 to i+2 at index i.
-var Steps = []store.Step{}
+var Steps = []store.Step{v1to2}
 
 // Open returns the set of files in dir.
 func Open(dir string, log *slog.Logger) *store.Set {

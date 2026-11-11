@@ -22,7 +22,7 @@ import (
 // Config is the process configuration.
 type Config struct {
 	LogLevel   string // debug | info | warn | error
-	ConfigDir  string // tags/settings/templates/backgrounds YAML; default /homeassistant/nfc_player
+	ConfigDir  string // records/settings/templates/backgrounds YAML; default /homeassistant/nfc_player
 	DataDir    string // cache and options.json; default /data
 	Listen     string // default :8099 under Supervisor, else 127.0.0.1:8099
 	HAURL      string // websocket URL
@@ -30,13 +30,12 @@ type Config struct {
 	Supervisor bool // running under Supervisor (SUPERVISOR_TOKEN set)
 }
 
-// File names inside ConfigDir.
+// File names inside ConfigDir. records.yaml is records.FileName; names of
+// older versions are in package migrate.
 const (
-	TagsFile        = "tags.yaml"
-	SettingsFile    = "settings.yaml"
-	TemplatesFile   = "templates.yaml"
-	BackgroundsFile = "backgrounds.yaml"
-	PoolsFile       = "pools.yaml"
+	SettingsFileName    = "settings.yaml"
+	TemplatesFileName   = "templates.yaml"
+	BackgroundsFileName = "backgrounds.yaml"
 )
 
 // Path returns the full path of a file in ConfigDir.

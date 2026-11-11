@@ -114,7 +114,7 @@ func TestLoadErrors(t *testing.T) {
 
 func newSettings(t *testing.T) (*SettingsStore, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), SettingsFile)
+	path := filepath.Join(t.TempDir(), SettingsFileName)
 	return NewSettingsStore(store.Open(path, model.DefaultSettings)), path
 }
 
@@ -217,8 +217,8 @@ func fakeTemplateValidate(t labels.Template) error {
 
 func newTemplates(t *testing.T) (*TemplateStore, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), TemplatesFile)
-	s, err := NewTemplateStore(store.Open(path, func() []labels.Template { return []labels.Template{} }))
+	path := filepath.Join(t.TempDir(), TemplatesFileName)
+	s, err := NewTemplateStore(store.Open(path, DefaultTemplatesFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestTemplatesCRUD(t *testing.T) {
 
 func TestTemplatesHandEditedBuiltinIDIsHidden(t *testing.T) {
 	s, path := newTemplates(t)
-	if err := os.WriteFile(path, []byte("- id: avery-5260\n  name: Shadow\n  builtin: true\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("templates:\n  - id: avery-5260\n    name: Shadow\n    builtin: true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	all, err := s.List()
@@ -319,8 +319,8 @@ func TestTemplatesHandEditedBuiltinIDIsHidden(t *testing.T) {
 }
 
 func TestBackgroundsCRUD(t *testing.T) {
-	path := filepath.Join(t.TempDir(), BackgroundsFile)
-	s, err := NewBackgroundStore(store.Open(path, func() []labels.Background { return []labels.Background{} }))
+	path := filepath.Join(t.TempDir(), BackgroundsFileName)
+	s, err := NewBackgroundStore(store.Open(path, DefaultBackgroundsFile))
 	if err != nil {
 		t.Fatal(err)
 	}

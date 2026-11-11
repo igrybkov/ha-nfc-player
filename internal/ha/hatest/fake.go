@@ -137,3 +137,17 @@ func (f *Fake) renameTag(id, name string) bool {
 	}
 	return false
 }
+
+// deleteTag removes a tag from TagList, as "tag/delete" does. It reports
+// whether the tag existed.
+func (f *Fake) deleteTag(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.TagList {
+		if f.TagList[i].ID == id {
+			f.TagList = slices.Delete(f.TagList, i, i+1)
+			return true
+		}
+	}
+	return false
+}

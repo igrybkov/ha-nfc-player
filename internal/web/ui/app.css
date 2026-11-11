@@ -188,3 +188,4 @@ ul.error { margin: 0; padding-left: 18px; }
 .pick-auto { display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .pick .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pick[aria-pressed="true"] { border-color: var(--primary); outline: 2px solid var(--primary); }
+.filters button[aria-pressed="true"] { border-color: var(--primary); outline: 2px solid var(--primary); }

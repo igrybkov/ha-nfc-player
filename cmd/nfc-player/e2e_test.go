@@ -21,6 +21,7 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/ha/hatest"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/scan"
 )
 
@@ -29,7 +30,7 @@ const testToken = "e2e-token"
 // solidArt is an ArtworkSource that never touches the network.
 type solidArt struct{}
 
-func (solidArt) Artwork(context.Context, model.Entry, bool) (image.Image, error) {
+func (solidArt) Artwork(context.Context, model.Subject, bool) (image.Image, error) {
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	for i := range img.Pix {
 		img.Pix[i] = 0x80
@@ -73,7 +74,7 @@ type app struct {
 func startApp(t *testing.T, haURL string) *app {
 	t.Helper()
 	cfgDir, dataDir := t.TempDir(), t.TempDir()
-	for _, name := range []string{config.TagsFile, config.SettingsFile, config.PoolsFile} {
+	for _, name := range []string{records.FileName, config.SettingsFileName} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "examples", name))
 		if err != nil {
 			t.Fatal(err)
@@ -154,7 +155,7 @@ func TestEndToEnd(t *testing.T) {
 	defer srv.Close()
 	a := startApp(t, srv.URL())
 
-	// Scan: event → seed entry by name (cut at "|") → office Sonos One.
+	// Scan: event → seed record by name (cut at "|") → office Sonos One.
 	waitFor(t, "tag_scanned subscription", func() bool { return srv.Subscribers(scan.EventType) > 0 })
 	if n := srv.Emit(scan.EventType, map[string]any{
 		"tag_id": "tag-1", "name": "Metallica — Essential | anything", "device_id": "dev-reader",
@@ -185,15 +186,15 @@ func TestEndToEnd(t *testing.T) {
 		_ = json.Unmarshal(body, &scans)
 		return len(scans) == 1
 	})
-	if s := scans[0]; s.Result != model.ScanPlayed || s.EntryID != "metallica-essential" || s.AreaID != "office" || s.Player != "sonos" {
+	if s := scans[0]; s.Result != model.ScanPlayed || s.RecordID != "metallica-essential" || s.AreaID != "office" || s.Player != "sonos" {
 		t.Errorf("scan = %+v", s)
 	}
 
 	checkUI(t, a)
 
-	// A PDF with art for three seed entries on black, from row 2 column 2.
+	// A PDF with art for three seed records on black, from row 2 column 2.
 	code, ct, body := a.post(t, "/api/print/pdf", map[string]any{
-		"entry_ids":   []string{"metallica-essential", "disturbed-divisible", "volodymyr-ivasiuk"},
+		"record_ids":  []string{"metallica-essential", "disturbed-divisible", "volodymyr-ivasiuk"},
 		"template_id": "avery-5260", "background_id": "black", "start_row": 2, "start_col": 2,
 	})
 	if code != http.StatusOK || ct != "application/pdf" || !bytes.HasPrefix(body, []byte("%PDF-")) {
@@ -214,7 +215,7 @@ func TestEndToEnd(t *testing.T) {
 }
 
 // Play and stop events over the wire, then the web play box, on the seed
-// files. The pool comes from examples/pools.yaml.
+// files from examples/.
 func TestEndToEndPlayEvents(t *testing.T) {
 	fake := officeHA()
 	srv := hatest.NewServer(fake, testToken)
@@ -255,17 +256,17 @@ func TestEndToEndPlayEvents(t *testing.T) {
 		return len(scans) == 2
 	})
 
-	// The play box: a seed tag by id, synchronous.
-	code, _, body := a.post(t, "/api/play", map[string]any{"area": "office", "tag": "kenny-rogers-21-number-ones"})
+	// The play box: a seed record by id, synchronous.
+	code, _, body := a.post(t, "/api/play", map[string]any{"area": "office", "record": "kenny-rogers-21-number-ones"})
 	var res model.PlayResult
-	if err := json.Unmarshal(body, &res); code != http.StatusOK || err != nil || res.Player != "sonos" || res.EntryID != "kenny-rogers-21-number-ones" {
+	if err := json.Unmarshal(body, &res); code != http.StatusOK || err != nil || res.Player != "sonos" || res.RecordID != "kenny-rogers-21-number-ones" {
 		t.Fatalf("play: %d %s", code, body)
 	}
 
-	// The seed pool is served.
-	code, _, body = a.get(t, "/api/pools")
+	// The seed records are served.
+	code, _, body = a.get(t, "/api/records")
 	if code != http.StatusOK || !bytes.Contains(body, []byte(`"id":"kitchen"`)) {
-		t.Errorf("pools: %d %.200s", code, body)
+		t.Errorf("records: %d %.200s", code, body)
 	}
 
 	_, _, body = a.get(t, "/api/scans")

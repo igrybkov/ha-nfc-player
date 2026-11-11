@@ -1,0 +1,11 @@
+version: 2
+templates:
+  - id: avery-5260-my-printer
+    name: Avery 5260 (my printer)
+    page: {width_in: 8.5, height_in: 11}
+    label: {width_in: 2.625, height_in: 1}
+    grid: {cols: 3, rows: 10}
+    margin: {left_in: 0.1875, top_in: 0.5}
+    gap: {col_in: 0.125, row_in: 0}
+    layout: side
+    font: {title_pt: 11, subtitle_pt: 8.5}

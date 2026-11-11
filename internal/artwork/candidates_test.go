@@ -35,7 +35,7 @@ func TestCandidates(t *testing.T) {
 
 	ctx := context.Background()
 	override := "mine.jpg"
-	e := model.Entry{Name: "Country Roads", URL: base + "/us/playlist/roads/pl.1", Label: model.LabelOverrides{Artwork: &override}}
+	e := model.Subject{Name: "Country Roads", URL: base + "/us/playlist/roads/pl.1", Label: model.LabelOverrides{Artwork: &override}}
 	var got []Candidate
 	next, pages := 0, 0
 	for next >= 0 {
@@ -80,7 +80,7 @@ func TestCandidates(t *testing.T) {
 	// Spotify gets its own art only.
 	share := "https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy"
 	f.oembed[share] = base + "/img/sp.jpg"
-	p, err := c.Candidates(ctx, model.Entry{Name: "S", URL: share}, 0, 10)
+	p, err := c.Candidates(ctx, model.Subject{Name: "S", URL: share}, 0, 10)
 	if err != nil || len(p.Items) != 1 || p.Items[0].Kind != KindCover || p.Next != -1 {
 		t.Fatalf("spotify %+v, %v", p, err)
 	}

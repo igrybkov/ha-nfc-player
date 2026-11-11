@@ -139,26 +139,26 @@ func TestResolveURLChain(t *testing.T) {
 
 	cases := []struct {
 		name  string
-		entry model.Entry
+		entry model.Subject
 		want  string
 	}{
 		{"album via iTunes lookup",
-			model.Entry{Name: "Disturbed — Divisible", URL: base + "/us/album/divisive/1646032515"},
+			model.Subject{Name: "Disturbed — Divisible", URL: base + "/us/album/divisive/1646032515"},
 			base + "/img/Music/v4/ab/cd/source/1200x1200bb.jpg"},
 		{"playlist via og:image, query and entity dropped",
-			model.Entry{Name: "Metallica — Essential", URL: base + "/us/playlist/metallica-essentials/pl.e55d"},
+			model.Subject{Name: "Metallica — Essential", URL: base + "/us/playlist/metallica-essentials/pl.e55d"},
 			base + "/img/Features/x/1200x1200bb.jpg"},
 		{"album lookup empty falls to og:image",
-			model.Entry{Name: "Gone — Pulled", URL: base + "/us/album/pulled/999"},
+			model.Subject{Name: "Gone — Pulled", URL: base + "/us/album/pulled/999"},
 			base + "/img/og/pulled/1200x1200bb.jpg"},
 		{"page missing falls to search",
-			model.Entry{Name: "Muse — Origin of Symmetry", URL: base + "/us/artist/muse/404"},
+			model.Subject{Name: "Muse — Origin of Symmetry", URL: base + "/us/artist/muse/404"},
 			base + "/img/search/1200x1200bb.jpg"},
 		{"no URL: search",
-			model.Entry{Name: "Muse — Origin of Symmetry"},
+			model.Subject{Name: "Muse — Origin of Symmetry"},
 			base + "/img/search/1200x1200bb.jpg"},
 		{"override wins",
-			model.Entry{Name: "X", URL: base + "/us/album/divisive/1646032515", Label: model.LabelOverrides{Artwork: str(" https://example.test/a.jpg ")}},
+			model.Subject{Name: "X", URL: base + "/us/album/divisive/1646032515", Label: model.LabelOverrides{Artwork: str(" https://example.test/a.jpg ")}},
 			"https://example.test/a.jpg"},
 	}
 	for _, tc := range cases {
@@ -174,7 +174,7 @@ func TestResolveURLChain(t *testing.T) {
 	}
 
 	f.search = ""
-	if _, err := c.ResolveURL(context.Background(), model.Entry{Name: "Nothing"}); !errors.Is(err, ErrNotFound) {
+	if _, err := c.ResolveURL(context.Background(), model.Subject{Name: "Nothing"}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("nothing found: err = %v, want ErrNotFound", err)
 	}
 }
@@ -204,7 +204,7 @@ func TestSpotifyArtwork(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := c.ResolveURL(context.Background(), model.Entry{Name: "Spotify — " + tc.name, URL: tc.url})
+			got, err := c.ResolveURL(context.Background(), model.Subject{Name: "Spotify — " + tc.name, URL: tc.url})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -218,7 +218,7 @@ func TestSpotifyArtwork(t *testing.T) {
 	}
 
 	// The whole path: resolve, download, crop.
-	img, err := c.Artwork(context.Background(), model.Entry{Name: "Album", URL: cases[0].url}, false)
+	img, err := c.Artwork(context.Background(), model.Subject{Name: "Album", URL: cases[0].url}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestArtworkCachesIndexAndImages(t *testing.T) {
 	f := newFakeApple(t)
 	f.lookup["42"] = f.srv.URL + "/img/a/100x100bb.jpg"
 	c := f.cache(t)
-	e := model.Entry{Name: "Queen — Bohemian Rhapsody", URL: f.srv.URL + "/us/album/br/42"}
+	e := model.Subject{Name: "Queen — Bohemian Rhapsody", URL: f.srv.URL + "/us/album/br/42"}
 	ctx := context.Background()
 
 	img, err := c.Artwork(ctx, e, false)
@@ -316,7 +316,7 @@ func TestArtworkOverrides(t *testing.T) {
 	}
 
 	for _, p := range []string{"art/ivasiuk.png", filepath.Join(c.ConfigDir, "art", "ivasiuk.png")} {
-		img, err := c.Artwork(ctx, model.Entry{Name: "Volodymyr Ivasiuk", Label: model.LabelOverrides{Artwork: str(p)}}, false)
+		img, err := c.Artwork(ctx, model.Subject{Name: "Volodymyr Ivasiuk", Label: model.LabelOverrides{Artwork: str(p)}}, false)
 		if err != nil {
 			t.Fatalf("path %q: %v", p, err)
 		}
@@ -325,13 +325,13 @@ func TestArtworkOverrides(t *testing.T) {
 		}
 	}
 	for _, p := range []string{"../" + filepath.Base(filepath.Dir(outside)) + "/secret.png", outside} {
-		if _, err := c.Artwork(ctx, model.Entry{Name: "X", Label: model.LabelOverrides{Artwork: str(p)}}, false); err == nil {
+		if _, err := c.Artwork(ctx, model.Subject{Name: "X", Label: model.LabelOverrides{Artwork: str(p)}}, false); err == nil {
 			t.Errorf("path %q outside the config dir was accepted", p)
 		}
 	}
 
 	// A URL override is downloaded and cached, but never put in the index.
-	e := model.Entry{Name: "Y", URL: f.srv.URL + "/us/album/x/1", Label: model.LabelOverrides{Artwork: str(f.srv.URL + "/img/override.png")}}
+	e := model.Subject{Name: "Y", URL: f.srv.URL + "/us/album/x/1", Label: model.LabelOverrides{Artwork: str(f.srv.URL + "/img/override.png")}}
 	if _, err := c.Artwork(ctx, e, false); err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestArtworkHTTPErrors(t *testing.T) {
 	f := newFakeApple(t)
 	c := f.cache(t)
 	f.search = f.srv.URL + "/missing/100x100bb.jpg" // resolves, but the image 404s
-	_, err := c.Artwork(context.Background(), model.Entry{Name: "Broken"}, false)
+	_, err := c.Artwork(context.Background(), model.Subject{Name: "Broken"}, false)
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("err = %v, want a 404 download error", err)
 	}
@@ -370,7 +370,7 @@ func TestNegativeCache(t *testing.T) {
 	c := f.cache(t)
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 	c.now = func() time.Time { return now }
-	e := model.Entry{Name: "Nobody — Nothing"}
+	e := model.Subject{Name: "Nobody — Nothing"}
 	ctx := context.Background()
 
 	for range 3 {
@@ -404,7 +404,7 @@ func TestConcurrentLookupsShareOneRun(t *testing.T) {
 	f.search = f.srv.URL + "/img/shared/100x100bb.jpg"
 	f.gate = make(chan struct{})
 	c := f.cache(t)
-	e := model.Entry{Name: "Ray Charles — Hits"}
+	e := model.Subject{Name: "Ray Charles — Hits"}
 	const callers = 8
 
 	errs := make(chan error, callers)
@@ -449,7 +449,7 @@ func TestGoneIndexURLResolvesAgain(t *testing.T) {
 			f := newFakeApple(t)
 			f.search = f.srv.URL + "/img/new/100x100bb.jpg"
 			c := f.cache(t)
-			e := model.Entry{Name: "Disturbed — Divisive"}
+			e := model.Subject{Name: "Disturbed — Divisive"}
 			key := e.Name + "\n"
 			dead := f.srv.URL + "/status/" + strconv.Itoa(code) + "/old.jpg"
 			if err := c.updateIndex(func(i map[string]string) { i[key] = dead }); err != nil {
@@ -476,7 +476,7 @@ func TestGoneIndexURLResolvesAgain(t *testing.T) {
 func TestIndexURLServerErrorKeepsEntry(t *testing.T) {
 	f := newFakeApple(t)
 	c := f.cache(t)
-	e := model.Entry{Name: "Flaky"}
+	e := model.Subject{Name: "Flaky"}
 	key := e.Name + "\n"
 	flaky := f.srv.URL + "/status/503/art.jpg"
 	if err := c.updateIndex(func(i map[string]string) { i[key] = flaky }); err != nil {
@@ -499,7 +499,7 @@ func TestChainHostAllowlist(t *testing.T) {
 	f.search = f.srv.URL + "/img/s/100x100bb.jpg"
 	c := f.cache(t)
 	c.AllowHost = nil // default: Apple hosts only
-	e := model.Entry{Name: "Muse — Origin", URL: f.srv.URL + "/us/album/origin/7"}
+	e := model.Subject{Name: "Muse — Origin", URL: f.srv.URL + "/us/album/origin/7"}
 
 	_, err := c.Artwork(context.Background(), e, false)
 	if !errors.Is(err, ErrNotFound) {
@@ -530,7 +530,7 @@ func TestChainRedirectChecked(t *testing.T) {
 	f := newFakeApple(t)
 	other := newFakeApple(t)
 	c := f.cache(t)
-	e := model.Entry{Name: "Redirected"}
+	e := model.Subject{Name: "Redirected"}
 	key := e.Name + "\n"
 	// The second server is reached as "localhost", which AllowHost refuses.
 	target := strings.Replace(other.srv.URL, "127.0.0.1", "localhost", 1) + "/img/x.png"
@@ -559,7 +559,7 @@ func TestOverrideDialGuard(t *testing.T) {
 	c := f.cache(t)
 	c.allowPrivate = false
 	u := f.srv.URL + "/img/override.png"
-	e := model.Entry{Name: "Local", Label: model.LabelOverrides{Artwork: &u}}
+	e := model.Subject{Name: "Local", Label: model.LabelOverrides{Artwork: &u}}
 	_, err := c.Artwork(context.Background(), e, false)
 	if !errors.Is(err, ErrBlocked) {
 		t.Fatalf("err = %v, want ErrBlocked for a loopback override", err)
@@ -590,7 +590,7 @@ func TestTransientErrorIsNotCached(t *testing.T) {
 	f := newFakeApple(t)
 	f.status = http.StatusServiceUnavailable
 	c := f.cache(t)
-	e := model.Entry{Name: "Flaky — Search"}
+	e := model.Subject{Name: "Flaky — Search"}
 	ctx := context.Background()
 
 	for i := 1; i <= 2; i++ {
@@ -642,7 +642,7 @@ func TestDecompressionBomb(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := "bomb.png"
-	if _, err := c.Artwork(ctx, model.Entry{Name: "F", Label: model.LabelOverrides{Artwork: &p}}, false); !errors.Is(err, ErrTooLarge) {
+	if _, err := c.Artwork(ctx, model.Subject{Name: "F", Label: model.LabelOverrides{Artwork: &p}}, false); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("override file: err = %v, want ErrTooLarge", err)
 	}
 

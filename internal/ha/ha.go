@@ -508,6 +508,14 @@ func (c *WSClient) RenameTag(ctx context.Context, tagID, name string) error {
 	return nil
 }
 
+// DeleteTag removes an HA tag ("tag/delete").
+func (c *WSClient) DeleteTag(ctx context.Context, tagID string) error {
+	if _, err := c.request(ctx, map[string]any{"type": "tag/delete", "tag_id": tagID}); err != nil {
+		return fmt.Errorf("tag/delete: %w", err)
+	}
+	return nil
+}
+
 // cachedList serves a registry from cache. It waits for a connection first:
 // the caches are dropped on connect, so a fetch started earlier would be
 // thrown away.

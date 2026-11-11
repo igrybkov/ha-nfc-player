@@ -190,6 +190,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			ok(map[string]any{"id": cmd.TagID, "name": cmd.Name})
+		case "tag/delete":
+			if !f.deleteTag(cmd.TagID) {
+				fail("not_found", "Unable to find tag_id")
+				continue
+			}
+			ok(nil)
 		case "call_service":
 			resp, err := f.CallService(ctx, cmd.Domain, cmd.Service, cmd.ServiceData, cmd.Target, cmd.ReturnResponse)
 			if err != nil {

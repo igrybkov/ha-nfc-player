@@ -6,22 +6,27 @@ import (
 
 	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/config"
+	"github.com/igrybkov/ha-nfc-player/internal/migrate"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
-	"github.com/igrybkov/ha-nfc-player/internal/pools"
-	"github.com/igrybkov/ha-nfc-player/internal/registry"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/store"
 )
 
 // The seed files in examples/ load through the real stores and keep the
 // values of the old automation.
 
-func TestSeedTags(t *testing.T) {
-	f := store.Open(filepath.Join("..", "..", "examples", config.TagsFile), registry.DefaultTagsFile)
+// seedFile opens a seed file in the set of examples/, as the app would.
+func seedFile[T any](name string, def func() T) *store.File[T] {
+	return store.In(migrate.Open(filepath.Join("..", "..", "examples"), nil), name, def)
+}
+
+func TestSeedRecords(t *testing.T) {
+	f := seedFile(records.FileName, records.DefaultFile)
 	file, err := f.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := registry.New(f)
+	recs := records.New(f)
 	want := map[string]struct {
 		name    string
 		shuffle bool
@@ -35,38 +40,64 @@ func TestSeedTags(t *testing.T) {
 		"ray-charles-the-ultimate-collection":             {"Ray Charles — The Ultimate Collection", true, catalog.KindAlbum},
 		"kenny-rogers-21-number-ones":                     {"Kenny Rogers — 21 Number Ones", true, catalog.KindPlaylist},
 	}
-	if file.Version != 1 || len(file.Tags) != len(want) {
-		t.Fatalf("version %d, %d tags; want 1, %d", file.Version, len(file.Tags), len(want))
+	if file.Version != migrate.Current || len(file.Records) != len(want)+1 {
+		t.Fatalf("version %d, %d records; want %d, %d", file.Version, len(file.Records), migrate.Current, len(want)+1)
 	}
-	for _, e := range reg.All() {
-		w, ok := want[e.ID]
-		if !ok {
-			t.Errorf("unexpected entry %q", e.ID)
+	// Every record passes the store's validation, in file order (items
+	// point back to earlier records).
+	check := records.New(store.Open(filepath.Join(t.TempDir(), records.FileName), records.DefaultFile))
+	for _, r := range recs.All() {
+		if _, err := check.Create(r); err != nil {
+			t.Errorf("%s: %v", r.ID, err)
+		}
+		if r.ID != records.Slug(r.Name) {
+			t.Errorf("%s: id is not the slug of the name (%s)", r.ID, records.Slug(r.Name))
+		}
+		// Scans look records up by normalized name.
+		if got, ok := recs.ByName(model.NormalizeName(r.Name + " | x")); !ok || got.ID != r.ID {
+			t.Errorf("%s: ByName finds %q, %v", r.ID, got.ID, ok)
+		}
+		if r.ID == "kitchen" {
 			continue
 		}
-		if e.ID != registry.Slug(e.Name) {
-			t.Errorf("%s: id is not the slug of the name (%s)", e.ID, registry.Slug(e.Name))
+		w, ok := want[r.ID]
+		if !ok {
+			t.Errorf("unexpected record %q", r.ID)
+			continue
 		}
-		if err := registry.Validate(e); err != nil {
-			t.Errorf("%s: %v", e.ID, err)
+		if len(r.Items) != 1 {
+			t.Errorf("%s: items %+v", r.ID, r.Items)
+			continue
 		}
-		m, err := catalog.Parse(e.URL)
+		m, err := catalog.Parse(r.Items[0].Media)
 		if err != nil || m.Kind != w.kind {
-			t.Errorf("%s: url parses as %v, %v; want %s", e.ID, m.Kind, err, w.kind)
+			t.Errorf("%s: media parses as %v, %v; want %s", r.ID, m.Kind, err, w.kind)
 		}
-		if e.Name != w.name || e.Shuffle != w.shuffle || e.Repeat != model.RepeatAll ||
-			e.Volume != nil || e.Player != nil || e.TagIDs == nil || len(e.TagIDs) != 0 {
-			t.Errorf("%s: %+v", e.ID, e)
+		if r.Name != w.name || r.Shuffle.For(records.MediaKind(r.Items[0].Media)) != w.shuffle ||
+			r.Repeat == nil || *r.Repeat != model.RepeatAll || r.Volume != nil || r.Player != nil {
+			t.Errorf("%s: %+v", r.ID, r)
 		}
-		// Scans look entries up by normalized name.
-		if got, ok := reg.ByName(model.NormalizeName(e.Name + " | x")); !ok || got.ID != e.ID {
-			t.Errorf("%s: ByName finds %q, %v", e.ID, got.ID, ok)
-		}
+	}
+
+	// The kitchen button hold: eight items, the first a record.
+	k, err := recs.Get("kitchen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k.Name != "Kitchen" || k.Shuffle != (model.Shuffle{}) || k.Repeat == nil || *k.Repeat != model.RepeatAll ||
+		k.Volume == nil || *k.Volume != 30 || k.Player != nil || len(k.Items) != 8 {
+		t.Errorf("kitchen = %+v", k)
+	}
+	if k.Items[0].Record != "kenny-rogers-21-number-ones" || k.Items[1].Media != "Cat Stevens — Teaser and the Firecat" {
+		t.Errorf("items = %+v", k.Items[:2])
+	}
+	if p, err := recs.Pick("kitchen"); err != nil || p.Record.ID != "kitchen" || p.Media == "" {
+		t.Errorf("Pick(kitchen) = %+v, %v", p, err)
 	}
 }
 
 func TestSeedSettings(t *testing.T) {
-	f := store.Open(filepath.Join("..", "..", "examples", config.SettingsFile), model.DefaultSettings)
+	f := seedFile(config.SettingsFileName, model.DefaultSettings)
 	if _, err := f.Load(); err != nil {
 		t.Fatal(err) // the store returns defaults on a parse error; fail here instead
 	}
@@ -103,35 +134,5 @@ func TestSeedSettings(t *testing.T) {
 	}
 	if len(s.Readers.Integrations) != 1 || s.Readers.Integrations[0] != "esphome" || !s.Players.Fallback {
 		t.Errorf("readers %+v, players %+v", s.Readers, s.Players)
-	}
-}
-
-func TestSeedPools(t *testing.T) {
-	tags := registry.New(store.Open(filepath.Join("..", "..", "examples", config.TagsFile), registry.DefaultTagsFile))
-	f := store.Open(filepath.Join("..", "..", "examples", config.PoolsFile), pools.DefaultFile)
-	file, err := f.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if file.Version != 1 || len(file.Pools) != 1 {
-		t.Fatalf("version %d, %d pools; want 1, 1", file.Version, len(file.Pools))
-	}
-	p, ok := pools.New(f, tags).Pool("kitchen")
-	if !ok {
-		t.Fatal("no kitchen pool")
-	}
-	if p.Name != "Kitchen" || p.Shuffle == nil || !*p.Shuffle || p.Repeat == nil || *p.Repeat != model.RepeatAll ||
-		p.Volume == nil || *p.Volume != 30 || p.Player != nil || len(p.Items) != 8 {
-		t.Errorf("kitchen = %+v", p)
-	}
-	if p.Items[0].Tag != "kenny-rogers-21-number-ones" || p.Items[1].Media != "Cat Stevens — Teaser and the Firecat" {
-		t.Errorf("items = %+v", p.Items[:2])
-	}
-	// Every pool passes the store's validation (tag items exist, URLs parse).
-	check := pools.New(store.Open(filepath.Join(t.TempDir(), config.PoolsFile), pools.DefaultFile), tags)
-	for _, p := range file.Pools {
-		if _, err := check.Create(p); err != nil {
-			t.Errorf("%s: %v", p.ID, err)
-		}
 	}
 }

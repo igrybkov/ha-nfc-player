@@ -1,6 +1,6 @@
 # Seed settings: the volumes and print calibration of the old automation and
 # bin/nfc-music-labels. Copy to <config_dir>/settings.yaml.
-version: 1
+version: 2
 readers:
   integrations: [esphome]
 players:

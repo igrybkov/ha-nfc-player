@@ -1,0 +1,96 @@
+# Seed records: the Music Map of automation 1709949609238 and the kitchen
+# button hold of the old automations. Copy to <config_dir>/records.yaml
+# (default /homeassistant/nfc_player/).
+#
+# A record plays when an HA tag with its name is scanned. Each item is media
+# (a URL, "Artist — Album", or a name to search), another record, or
+# "others: true" for every other record.
+version: 2
+records:
+  - id: metallica-essential
+    name: Metallica — Essential
+    aliases: []
+    items:
+      - media: https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5
+    shuffle: {albums: true, artists: true, playlists: true, other: true}
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: disturbed-divisible
+    name: Disturbed — Divisible
+    aliases: []
+    items:
+      - media: https://music.apple.com/us/album/divisive/1646032515
+    shuffle: {albums: false, artists: false, playlists: false, other: false}
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: creedence-clearwater-revival-essential
+    name: Creedence Clearwater Revival — Essential
+    aliases: []
+    items:
+      - media: https://music.apple.com/us/playlist/creedence-clearwater-revival-essentials/pl.a64e22c649a64385b037a8f1a1559cb1
+    shuffle: {albums: true, artists: true, playlists: true, other: true}
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: queen-bohemian-rhapsody-the-original-soundtrack
+    name: Queen — Bohemian Rhapsody (The Original Soundtrack)
+    aliases: []
+    items:
+      - media: https://music.apple.com/us/album/bohemian-rhapsody-the-original-soundtrack/6781027361
+    shuffle: {albums: false, artists: false, playlists: false, other: false}
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: volodymyr-ivasiuk
+    name: Volodymyr Ivasiuk
+    aliases: []
+    items:
+      - media: https://music.apple.com/us/artist/%D0%B2%D0%BE%D0%BB%D0%BE%D0%B4%D0%B8%D0%BC%D0%B8%D1%80-%D1%96%D0%B2%D0%B0%D1%81%D1%8E%D0%BA/1797008889
+    shuffle: {albums: true, artists: true, playlists: true, other: true}
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: ray-charles-the-ultimate-collection
+    name: Ray Charles — The Ultimate Collection
+    aliases: []
+    items:
+      - media: https://music.apple.com/us/album/the-atlantic-hits/1544753335
+    shuffle: {albums: true, artists: true, playlists: true, other: true}
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: kenny-rogers-21-number-ones
+    name: Kenny Rogers — 21 Number Ones
+    aliases: []
+    items:
+      - media: https://music.apple.com/us/playlist/kenny-rogers-essentials/pl.97c239b65c7e4e3eb786f27c74790b8b
+    shuffle: {albums: true, artists: true, playlists: true, other: true}
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: kitchen
+    name: Kitchen
+    aliases: []
+    items:
+      - record: kenny-rogers-21-number-ones
+      - media: Cat Stevens — Teaser and the Firecat
+      - media: https://music.apple.com/us/playlist/ray-charles-essentials/pl.0a06c0dbe3a44ff2b4a40bd0d786c5c5
+      - media: 'Creedence Clearwater Revival — Chronicle: The 20 Greatest Hits'
+      - media: https://music.apple.com/us/playlist/the-beatles-essentials/pl.59619449a71f44dc99c4dabd6c442d41
+      - media: https://music.apple.com/us/playlist/elvis-presley-essentials/pl.5dbb70062bcd4b23b9430dd43f6fae5f
+      - media: https://music.apple.com/us/artist/the-dead-south/668262442
+      - media: https://music.apple.com/us/playlist/boombox/pl.2fb591e573134d70b5ffd12d1bd42e0b
+    shuffle: {albums: null, artists: null, playlists: null, other: null}
+    repeat: all
+    volume: 30
+    player: null
+    label: {title: null, subtitle: null, artwork: null}

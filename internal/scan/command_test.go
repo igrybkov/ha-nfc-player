@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,20 +18,18 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/player"
 	"github.com/igrybkov/ha-nfc-player/internal/player/musicassistant"
 	"github.com/igrybkov/ha-nfc-player/internal/player/sonos"
-	"github.com/igrybkov/ha-nfc-player/internal/pools"
-	"github.com/igrybkov/ha-nfc-player/internal/registry"
+	"github.com/igrybkov/ha-nfc-player/internal/records"
 	"github.com/igrybkov/ha-nfc-player/internal/rooms"
 )
 
 // newHandler is a Handler that is not running, for the synchronous
-// Play / Stop / PlayEntry paths. pick 0 makes pool picks deterministic.
-func newHandler(f *hatest.Fake) (*Handler, *Ring) {
+// Play / Stop / PlayRecord paths.
+func newHandler(t testing.TB, f *hatest.Fake) (*Handler, *Ring) {
 	s := &settings{model.DefaultSettings()}
 	ma := musicassistant.New(f, s)
 	ring := NewRing(LogSize)
-	h := New(Deps{HA: f, Entries: testEntries, Pools: testPools, Settings: s, Rooms: rooms.New(f, s),
+	h := New(Deps{HA: f, Records: newRecords(t), Settings: s, Rooms: rooms.New(f, s),
 		Router: player.NewRouter(s, ma, sonos.New(f, nil), ma), Log: ring, Logger: slog.New(slog.DiscardHandler)})
-	h.intn = func(int) int { return 0 }
 	return h, ring
 }
 
@@ -61,7 +59,7 @@ func TestPlayEventSequence(t *testing.T) {
 	hs := start(t, fakeHA())
 	hs.f.EmitData(PlayEventType, map[string]any{
 		"area": "office", "media": metallicaURL, "volume": "35", "shuffle": "on", "repeat": "one",
-		"player": "", "tag": "", "pool": "", "toggle": "", // template blanks are unset
+		"player": "", "record": "", "tag": "", "pool": "", "toggle": "", // template blanks are unset
 	})
 	s := hs.waitScans(t, 1)[0]
 	want := model.Scan{Time: s.Time, TagName: metallicaURL, AreaID: "office", Player: "sonos",
@@ -112,7 +110,7 @@ func TestToggle(t *testing.T) {
 	hs := start(t, f)
 	hs.f.EmitData(PlayEventType, map[string]any{"area": "family_room", "pool": "kitchen", "toggle": true})
 	s := hs.waitScans(t, 1)[0]
-	if s.Result != model.ScanStopped || s.Player != "music_assistant" || s.TagName != "pool kitchen (toggle)" || s.PoolID != "" {
+	if s.Result != model.ScanStopped || s.Player != "music_assistant" || s.TagName != "pool kitchen (toggle)" || s.RecordID != "" {
 		t.Fatalf("scan = %+v", s)
 	}
 	want := []string{"media_player.media_stop media_player.family_room_ma"}
@@ -121,7 +119,7 @@ func TestToggle(t *testing.T) {
 	}
 
 	// The same toggle with nothing playing plays.
-	h, _ := newHandler(&hatest.Fake{AreaList: f.AreaList, DeviceList: f.DeviceList, EntityList: f.EntityList})
+	h, _ := newHandler(t, &hatest.Fake{AreaList: f.AreaList, DeviceList: f.DeviceList, EntityList: f.EntityList})
 	res, err := h.Play(context.Background(), model.PlayCommand{Target: model.Target{AreaID: "family_room"}, Media: queenURL, Toggle: true})
 	if err != nil || res.Stopped || res.Player != "sonos" {
 		t.Errorf("toggle with nothing playing = %+v, %v", res, err)
@@ -136,7 +134,7 @@ func TestStop(t *testing.T) {
 			{EntityID: "media_player.arc", State: "playing"},
 			{EntityID: "media_player.family_room_ma", State: "playing"},
 		}
-		h, ring := newHandler(f)
+		h, ring := newHandler(t, f)
 		name, err := h.Stop(ctx, model.Target{AreaID: "family_room"})
 		if err != nil || name != "sonos" {
 			t.Fatalf("Stop = %q, %v", name, err)
@@ -151,7 +149,7 @@ func TestStop(t *testing.T) {
 	})
 	t.Run("nothing playing stops Sonos", func(t *testing.T) {
 		f := fakeHA()
-		h, _ := newHandler(f)
+		h, _ := newHandler(t, f)
 		if name, err := h.Stop(ctx, model.Target{AreaID: "family_room"}); err != nil || name != "sonos" {
 			t.Fatalf("Stop = %q, %v", name, err)
 		}
@@ -170,7 +168,7 @@ func TestStop(t *testing.T) {
 	t.Run("no player in area", func(t *testing.T) {
 		f := fakeHA()
 		f.AreaList = append(f.AreaList, ha.Area{AreaID: "attic", Name: "Attic"})
-		h, _ := newHandler(f)
+		h, _ := newHandler(t, f)
 		if _, err := h.Stop(ctx, model.Target{AreaID: "attic"}); err == nil || len(f.Calls) != 0 {
 			t.Errorf("err = %v, calls = %v", err, f.Calls)
 		}
@@ -180,7 +178,7 @@ func TestStop(t *testing.T) {
 func TestPlayTargets(t *testing.T) {
 	ctx := context.Background()
 	f := fakeHA()
-	h, ring := newHandler(f)
+	h, ring := newHandler(t, f)
 
 	// A player entity plays on that entity only, at its area's volume.
 	res, err := h.Play(ctx, model.PlayCommand{Target: model.Target{Entity: "media_player.family_room_ma"}, Media: disturbedURL})
@@ -213,10 +211,12 @@ func TestPlayTargets(t *testing.T) {
 		{"volume", model.PlayCommand{Target: model.Target{AreaID: "office"}, Media: disturbedURL, Volume: ptr(101)}, ErrInvalid},
 		{"repeat", model.PlayCommand{Target: model.Target{AreaID: "office"}, Media: disturbedURL, Repeat: ptr(model.Repeat("x"))}, ErrInvalid},
 		{"bad URL", model.PlayCommand{Target: model.Target{AreaID: "office"}, Media: "https://open.spotify.com/album/1"}, ErrInvalid},
-		{"unknown tag", model.PlayCommand{Target: model.Target{AreaID: "office"}, Tag: "nope"}, registry.ErrNotFound},
-		{"unknown pool", model.PlayCommand{Target: model.Target{AreaID: "office"}, Pool: "nope"}, pools.ErrNotFound},
-		{"deleted tag item", model.PlayCommand{Target: model.Target{AreaID: "office"}, Pool: "missing"}, registry.ErrNotFound},
-		{"empty pool", model.PlayCommand{Target: model.Target{AreaID: "office"}, Pool: "empty"}, ErrEmptyPool},
+		{"unknown record", model.PlayCommand{Target: model.Target{AreaID: "office"}, Record: "nope"}, records.ErrNotFound},
+		{"unknown tag", model.PlayCommand{Target: model.Target{AreaID: "office"}, Tag: "nope"}, records.ErrNotFound},
+		{"unknown pool", model.PlayCommand{Target: model.Target{AreaID: "office"}, Pool: "nope"}, records.ErrNotFound},
+		{"deleted record item", model.PlayCommand{Target: model.Target{AreaID: "office"}, Record: "missing"}, records.ErrNothingToPlay},
+		{"empty record", model.PlayCommand{Target: model.Target{AreaID: "office"}, Pool: "empty"}, records.ErrNothingToPlay},
+		{"bad URL in a record", model.PlayCommand{Target: model.Target{AreaID: "office"}, Record: "bad-url"}, ErrInvalid},
 	}
 	for _, tt := range errs {
 		f.Reset()
@@ -253,7 +253,7 @@ func TestPlayEventEntityWithoutArea(t *testing.T) {
 // Radio in an area with both players skips Sonos.
 func TestPlayRadioSkipsSonos(t *testing.T) {
 	f := fakeHA()
-	h, _ := newHandler(f)
+	h, _ := newHandler(t, f)
 	res, err := h.Play(context.Background(), model.PlayCommand{Target: model.Target{AreaID: "family_room"}, Media: queenURL, Radio: true})
 	if err != nil || res.Player != "music_assistant" {
 		t.Fatalf("Play = %+v, %v", res, err)
@@ -276,7 +276,7 @@ func TestPlayMediaText(t *testing.T) {
 	for _, tt := range tests {
 		f := fakeHA()
 		searchResponds(f)
-		h, _ := newHandler(f)
+		h, _ := newHandler(t, f)
 		res, err := h.Play(context.Background(), model.PlayCommand{Target: model.Target{AreaID: "family_room"}, Media: tt.media})
 		if err != nil || res.Player != "sonos" || res.Media != tt.media {
 			t.Fatalf("%s: Play = %+v, %v", tt.media, res, err)
@@ -296,8 +296,9 @@ func TestPlayMediaText(t *testing.T) {
 	}
 }
 
-// Settings precedence: command, pool, tag entry, defaults. A pool entry's
-// Volume beats the pool's; its Shuffle and Repeat are ignored.
+// Settings precedence: command, then the record asked for (whatever item
+// the pick went down to), then defaults. The record's shuffle depends on
+// the kind of media picked; a command's shuffle applies to every kind.
 func TestPlaySettingsPrecedence(t *testing.T) {
 	type want struct {
 		volume  float64
@@ -307,23 +308,21 @@ func TestPlaySettingsPrecedence(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  model.PlayCommand
-		pick int
 		want want
 	}{
-		// Item 0 is metallica-essential: shuffle true, repeat all.
-		{"pool over entry", model.PlayCommand{Pool: "kitchen"}, 0, want{0.40, true, "one"}},
-		{"command over pool", model.PlayCommand{Pool: "kitchen", Volume: ptr(10), Shuffle: ptr(false), Repeat: ptr(model.RepeatOff)}, 0, want{0.10, false, "off"}},
-		// Item 1 is a media URL: shuffle defaults to false.
-		{"pool over defaults", model.PlayCommand{Pool: "kitchen"}, 1, want{0.40, false, "one"}},
-		{"pool entry volume", model.PlayCommand{Tag: "kitchen-tag"}, 0, want{0.55, true, "one"}},
-		{"entry", model.PlayCommand{Tag: "Disturbed — Divisible | x"}, 0, want{0.50, false, "all"}},
-		{"defaults", model.PlayCommand{Media: queenURL}, 0, want{0.15, false, "all"}},
+		{"album in order by default", model.PlayCommand{Record: "albums"}, want{0.40, false, "all"}},
+		// metallica-essential says shuffle on, repeat all: nest wins.
+		{"scanned record over inner record", model.PlayCommand{Record: "nest"}, want{0.55, false, "off"}},
+		{"command over record", model.PlayCommand{Record: "nest", Volume: ptr(10), Shuffle: ptr(true), Repeat: ptr(model.RepeatOne)}, want{0.10, true, "one"}},
+		{"tag alias", model.PlayCommand{Tag: "nest-tag"}, want{0.55, false, "off"}},
+		{"tag by name", model.PlayCommand{Tag: "Disturbed — Divisible | x"}, want{0.50, false, "all"}},
+		{"record by name", model.PlayCommand{Record: "metallica — essential"}, want{0.15, true, "all"}},
+		{"defaults", model.PlayCommand{Media: queenURL}, want{0.15, false, "all"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := fakeHA()
-			h, _ := newHandler(f)
-			h.intn = func(int) int { return tt.pick }
+			h, _ := newHandler(t, f)
 			tt.cmd.AreaID = "office"
 			if _, err := h.Play(context.Background(), tt.cmd); err != nil {
 				t.Fatal(err)
@@ -344,94 +343,55 @@ func TestPlaySettingsPrecedence(t *testing.T) {
 	}
 }
 
-// A tag with a pool: by event, by scan and by PlayEntry. Nested pools fail.
-func TestPoolEntry(t *testing.T) {
+// A record of several items: by command, by v1 pool alias and by scan.
+// Each play picks one item and reports it as Media.
+func TestPlayRecordPicks(t *testing.T) {
 	ctx := context.Background()
+	items := []string{metallicaURL, queenURL, "Volodymyr Ivasiuk"}
 	f := fakeHA()
-	h, ring := newHandler(f)
+	searchResponds(f)
+	h, ring := newHandler(t, f)
 
-	res, err := h.Play(ctx, model.PlayCommand{Target: model.Target{AreaID: "office"}, Tag: "kitchen-tag"})
-	want := model.PlayResult{Player: "sonos", EntryID: "metallica-essential", PoolID: "kitchen"}
-	if err != nil || res != want {
-		t.Fatalf("Play = %+v, %v; want %+v", res, err, want)
-	}
-	if s := ring.Recent()[0]; s.TagName != "tag kitchen-tag" || s.EntryID != "metallica-essential" || s.PoolID != "kitchen" {
-		t.Errorf("scan = %+v", s)
-	}
-
-	// PlayEntry (test play) picks too. The last pick is left out, so pick 0
-	// is now the Queen URL.
-	if name, err := h.PlayEntry(ctx, testEntries[4], "office"); err != nil || name != "sonos" {
-		t.Fatalf("PlayEntry = %q, %v", name, err)
-	}
-	if pm := playMedia(f.Calls); pm[len(pm)-1].Data["media_content_id"] != queenURL {
-		t.Errorf("played %v", pm[len(pm)-1].Data)
-	}
-
-	f.Reset()
-	if _, err := h.Play(ctx, model.PlayCommand{Target: model.Target{AreaID: "office"}, Tag: "nested-tag"}); !errors.Is(err, ErrNestedPool) {
-		t.Errorf("nested pool: err = %v", err)
-	}
-	if _, err := h.PlayEntry(ctx, testEntries[5], "office"); !errors.Is(err, ErrNestedPool) {
-		t.Errorf("nested pool by PlayEntry: err = %v", err)
-	}
-	if s := ring.Recent()[0]; s.Result != model.ScanError || s.PoolID != "nested" {
-		t.Errorf("scan = %+v", s)
-	}
-	if len(f.ServiceCalls()) != 0 {
-		t.Errorf("nested pool made calls: %v", services(f.ServiceCalls()))
-	}
-
-	// A scan of the pool tag keeps the scanned entry; the pick goes to Media.
-	hs := start(t, fakeHA())
-	hs.h.intn = func(int) int { return 0 }
-	hs.scan("tag-kitchen", "", "reader-office")
-	s := hs.waitScans(t, 1)[0]
-	if s.Result != model.ScanPlayed || s.EntryID != "kitchen-tag" || s.PoolID != "kitchen" || s.Media != "metallica-essential" || s.Source != model.SourceTag {
-		t.Errorf("scan = %+v", s)
-	}
-}
-
-func TestPoolPickNeverRepeats(t *testing.T) {
-	h, _ := newHandler(&hatest.Fake{})
-	r := rand.New(rand.NewPCG(1, 2))
-	h.intn = r.IntN
-	p := testPools["kitchen"]
-	seen := map[model.PoolItem]int{}
-	last := h.pick(p)
-	for range 300 {
-		it := h.pick(p)
-		if it == last {
-			t.Fatalf("picked %+v twice in a row", it)
+	for _, cmd := range []model.PlayCommand{{Record: "kitchen"}, {Pool: "kitchen"}, {Tag: "kitchen-tag"}} {
+		cmd.AreaID = "office"
+		res, err := h.Play(ctx, cmd)
+		if err != nil || res.Player != "sonos" || res.RecordID != "kitchen" || !slices.Contains(items, res.Media) {
+			t.Fatalf("Play(%+v) = %+v, %v", cmd, res, err)
 		}
-		seen[it]++
-		last = it
+		if s := ring.Recent()[0]; s.RecordID != "kitchen" || s.Media != res.Media || s.Result != model.ScanPlayed {
+			t.Errorf("scan = %+v", s)
+		}
 	}
-	if len(seen) != len(p.Items) {
-		t.Errorf("picked %d of %d items: %v", len(seen), len(p.Items), seen)
+	if s := ring.Recent()[0]; s.TagName != "tag kitchen-tag" {
+		t.Errorf("scan = %+v", s)
 	}
 
-	// A single item repeats.
-	one := model.Pool{ID: "one", Items: []model.PoolItem{{Media: queenURL}}}
-	first, second := h.pick(one), h.pick(one)
-	if first != second {
-		t.Errorf("single-item pool picked %+v then %+v", first, second)
+	hs := start(t, fakeHA())
+	searchResponds(hs.f)
+	hs.scan("tag-kitchen", "Kitchen", "reader-office")
+	s := hs.waitScans(t, 1)[0]
+	if s.Result != model.ScanPlayed || s.RecordID != "kitchen" || !slices.Contains(items, s.Media) || s.Source != model.SourceTag {
+		t.Errorf("scan = %+v", s)
 	}
 }
 
-// Pool picks from many goroutines: run with -race.
-func TestPoolPickConcurrent(t *testing.T) {
-	h, _ := newHandler(&hatest.Fake{})
-	h.intn = rand.IntN
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Go(func() {
-			for range 100 {
-				h.pick(testPools["kitchen"])
-			}
-		})
+// A record that leads to no media fails before any call.
+func TestPlayRecordNothingToPlay(t *testing.T) {
+	f := fakeHA()
+	h, ring := newHandler(t, f)
+	for _, id := range []string{"empty", "missing"} {
+		if _, err := h.PlayRecord(context.Background(), id, "office"); !errors.Is(err, records.ErrNothingToPlay) {
+			t.Errorf("%s: err = %v", id, err)
+		}
 	}
-	wg.Wait()
+	hs := start(t, fakeHA())
+	hs.scan("", "Empty", "reader-office")
+	if s := hs.waitScans(t, 1)[0]; s.Result != model.ScanError || s.RecordID != "empty" || !strings.Contains(s.Error, "nothing to play") {
+		t.Errorf("scan = %+v", s)
+	}
+	if len(f.ServiceCalls())+len(hs.f.ServiceCalls()) != 0 || len(ring.Recent()) != 0 {
+		t.Errorf("calls %v, scans %v", services(f.ServiceCalls()), ring.Recent())
+	}
 }
 
 func TestDecodeEventData(t *testing.T) {
@@ -444,11 +404,11 @@ func TestDecodeEventData(t *testing.T) {
 		return d.playCommand()
 	}
 	t.Run("lenient", func(t *testing.T) {
-		cmd, err := decode(t, `{"area":" office ","volume":"30","shuffle":"true","repeat":"ALL","radio":"yes","toggle":1,"tag":"","pool":null,"media":"x"}`)
+		cmd, err := decode(t, `{"area":" office ","volume":"30","shuffle":"true","repeat":"ALL","radio":"yes","toggle":1,"record":" kitchen ","tag":"","pool":null,"media":"x"}`)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := model.PlayCommand{Target: model.Target{AreaID: "office"}, Media: "x", Volume: ptr(30), Shuffle: ptr(true),
+		want := model.PlayCommand{Target: model.Target{AreaID: "office"}, Media: "x", Record: "kitchen", Volume: ptr(30), Shuffle: ptr(true),
 			Repeat: ptr(model.RepeatAll), Radio: true, Toggle: true, Source: model.SourceEvent}
 		if !reflect.DeepEqual(cmd, want) {
 			t.Errorf("cmd:\n got %+v\nwant %+v", cmd, want)
@@ -543,7 +503,7 @@ func (f failingHA) SubscribeEvents(ctx context.Context, typ string, fn func(ha.E
 // double them.
 func TestRunSubscribeFailure(t *testing.T) {
 	f := fakeHA()
-	h, _ := newHandler(f)
+	h, _ := newHandler(t, f)
 	h.deps.HA = failingHA{f, StopEventType}
 	if err := h.Run(context.Background()); err == nil {
 		t.Fatal("Run: want error")
@@ -557,7 +517,7 @@ func TestRunSubscribeFailure(t *testing.T) {
 // calling any service, so a web request doesn't wait out a long play.
 func TestPlayLockWaitHonorsContext(t *testing.T) {
 	f := fakeHA()
-	h, _ := newHandler(f)
+	h, _ := newHandler(t, f)
 	unlock, err := h.lock(context.Background(), "office")
 	if err != nil {
 		t.Fatal(err)
