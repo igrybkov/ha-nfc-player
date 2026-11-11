@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- Reorder a record's items by dragging them by their handle (⠿). It works
+  with a mouse and on touch screens. With the handle focused, the up and
+  down arrow keys move the item too. The ↑ and ↓ buttons are gone.
+
 ## 0.4.2
 
 - A record holds each item once. Links that point to the same album,

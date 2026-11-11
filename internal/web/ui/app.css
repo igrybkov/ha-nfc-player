@@ -110,6 +110,12 @@ a.title { color: var(--fg); }
 a.link { display: block; color: var(--muted); overflow-wrap: anywhere; }
 .link { overflow-wrap: anywhere; }
 /* A link's name, edited in place: reads like a title until focused. */
+/* Item reordering: drag a row by its handle. */
+.drag-handle { cursor: grab; touch-action: none; color: var(--muted); font-size: 1.1em; padding: 2px 4px; }
+.drag-handle:active { cursor: grabbing; }
+.list li.dragging { opacity: 0.5; }
+.list li.drop-before { box-shadow: inset 0 3px 0 var(--primary); }
+.list li.drop-after { box-shadow: inset 0 -3px 0 var(--primary); }
 input.item-name { width: 100%; min-height: 32px; padding: 4px 6px; font-weight: 500; border-color: transparent; background: transparent; }
 input.item-name:hover, input.item-name:focus { border-color: var(--line); background: var(--card); }
 .thumb { width: 48px; height: 48px; border-radius: 4px; object-fit: cover; background: var(--line); flex: none; }

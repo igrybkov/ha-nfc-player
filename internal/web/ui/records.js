@@ -228,9 +228,53 @@ async function editor(view, id, params) {
   // marked, so the user sees why the server refuses it and removes it.
   const items = (record.items ?? []).map((i) => (i.record ? { record: i.record } : { media: i.media, name: i.name ?? '' }));
   const itemList = h('ol', { class: 'list plain items' });
-  const move = (i, d) => {
-    [items[i], items[i + d]] = [items[i + d], items[i]];
-    drawItems();
+  // moveItem puts the item at from in front of the one now at before
+  // (items.length = last), then keeps the focus on its handle.
+  const moveItem = (from, before, focus = false) => {
+    const to = before > from ? before - 1 : before;
+    if (to !== from) {
+      items.splice(to, 0, ...items.splice(from, 1));
+      drawItems();
+    }
+    if (focus) itemList.children[to]?.querySelector('.drag-handle')?.focus();
+  };
+
+  // startDrag follows a pointer (mouse, finger or pen) from a row's handle
+  // and drops the row in front of the row under it. Pointer events work
+  // on touch screens, where HTML drag and drop does not.
+  const startDrag = (ev, from) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const handle = ev.currentTarget;
+    const rows = [...itemList.children];
+    rows[from].classList.add('dragging');
+    handle.setPointerCapture(ev.pointerId);
+    let before = from;
+    const mark = () => {
+      rows.forEach((r, k) => {
+        r.classList.toggle('drop-before', k === before && before !== from && before !== from + 1);
+        r.classList.toggle('drop-after', before === rows.length && k === rows.length - 1 && from !== rows.length - 1);
+      });
+    };
+    const onMove = (e) => {
+      const k = rows.findIndex((r) => { const b = r.getBoundingClientRect(); return e.clientY < b.top + b.height / 2; });
+      before = k < 0 ? rows.length : k;
+      mark();
+      // Near the window edge, scroll so a long list can be crossed.
+      if (e.clientY < 80) window.scrollBy(0, -12);
+      else if (e.clientY > window.innerHeight - 40) window.scrollBy(0, 12);
+    };
+    const onEnd = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onEnd);
+      handle.removeEventListener('pointercancel', onEnd);
+      rows.forEach((r) => r.classList.remove('dragging', 'drop-before', 'drop-after'));
+      moveItem(from, before);
+      checkDirty();
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onEnd);
+    handle.addEventListener('pointercancel', onEnd);
   };
   // nameInput edits a link's name. An item saved without one shows the
   // service's name greyed out; Save stores it (see collect).
@@ -262,9 +306,17 @@ async function editor(view, id, params) {
           h('div', { class: 'title', text: it.media }),
           h('div', { class: 'muted small', text: 'search' }));
     const art = r ? thumb(r, 32) : it.media && isURL(it.media) ? mediaThumb(it.media) : h('span', { class: 'thumb s32' });
-    return h('li', {}, h('div', { class: 'row' }, art, text,
-      h('button', { type: 'button', class: 'icon', 'aria-label': 'Move up', text: '↑', disabled: i === 0, onclick: () => move(i, -1) }),
-      h('button', { type: 'button', class: 'icon', 'aria-label': 'Move down', text: '↓', disabled: i === items.length - 1, onclick: () => move(i, 1) }),
+    return h('li', {}, h('div', { class: 'row' },
+      h('button', {
+        type: 'button', class: 'icon drag-handle', text: '⠿', title: 'Drag to move',
+        'aria-label': 'Move: drag, or press the up and down arrow keys',
+        onpointerdown: (ev) => startDrag(ev, i),
+        onkeydown: (ev) => {
+          if (ev.key === 'ArrowUp' && i > 0) { ev.preventDefault(); moveItem(i, i - 1, true); checkDirty(); }
+          if (ev.key === 'ArrowDown' && i < items.length - 1) { ev.preventDefault(); moveItem(i, i + 2, true); checkDirty(); }
+        },
+      }),
+      art, text,
       h('button', { type: 'button', class: 'icon', 'aria-label': 'Remove', text: '×', onclick: () => { items.splice(i, 1); drawItems(); } })));
   };
   function drawItems() {
