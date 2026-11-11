@@ -1,0 +1,52 @@
+version: 1
+tags:
+  - id: ffdp
+    name: Five Finger Death Punch
+    tag_ids: [04-DE]
+    url: ""
+    pool: ffdp
+    shuffle: false
+    repeat: all
+    volume: 40
+    player: null
+    label: {title: null, subtitle: Mix, artwork: null}
+  - id: kenny
+    name: Kenny Rogers — 21 Number Ones
+    tag_ids: []
+    url: https://music.apple.com/us/album/21-number-ones/1
+    pool: ""
+    shuffle: true
+    repeat: one
+    volume: null
+    player: sonos
+    label: {title: null, subtitle: null, artwork: art/kenny.jpg}
+  - id: kitchen
+    name: Kitchen
+    tag_ids: []
+    url: https://music.apple.com/us/album/kitchen-album/2
+    pool: ""
+    shuffle: false
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: anything
+    name: Anything
+    tag_ids: []
+    url: ""
+    pool: all
+    shuffle: false
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}
+  - id: party-tag
+    name: Party time
+    tag_ids: []
+    url: ""
+    pool: party
+    shuffle: false
+    repeat: all
+    volume: null
+    player: null
+    label: {title: null, subtitle: null, artwork: null}

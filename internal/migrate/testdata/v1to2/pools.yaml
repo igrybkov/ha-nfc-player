@@ -1,0 +1,30 @@
+version: 1
+pools:
+  - id: ffdp
+    name: Five Finger Death Punch
+    items:
+      - media: https://music.apple.com/us/artist/ffdp/3
+      - media: https://music.apple.com/us/artist/ffdp/3
+    shuffle: true
+    repeat: all
+    volume: null
+    player: alexa
+    label: {title: FFDP, subtitle: null, artwork: null}
+  - id: kitchen
+    name: Kitchen
+    items:
+      - tag: kenny
+      - media: Cat Stevens — Teaser and the Firecat
+      - tag: deleted
+    shuffle: false
+    repeat: null
+    volume: 30
+    player: null
+  - id: party
+    name: Party
+    items:
+      - media: https://music.apple.com/us/playlist/party/pl.1
+    shuffle: null
+    repeat: null
+    volume: null
+    player: null
