@@ -245,7 +245,7 @@ func TestRouterQueryOnSonos(t *testing.T) {
 	for _, c := range f.Calls {
 		services = append(services, c.Domain+"."+c.Service)
 	}
-	want := []string{"music_assistant.search", "media_player.media_stop", "media_player.volume_set", "media_player.repeat_set", "media_player.shuffle_set", "media_player.play_media"}
+	want := []string{"music_assistant.search", "media_player.media_stop", "media_player.volume_set", "media_player.repeat_set", "media_player.shuffle_set", "media_player.play_media", "media_player.repeat_set", "media_player.shuffle_set"}
 	if !reflect.DeepEqual(services, want) {
 		t.Fatalf("services = %v", services)
 	}

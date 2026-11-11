@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 
 	"github.com/igrybkov/ha-nfc-player/internal/catalog"
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
@@ -18,14 +19,17 @@ const ArtistSongLimit = 50
 
 // Player is the Sonos player.
 type Player struct {
-	ha    ha.Client
-	apple catalog.Apple
+	ha      ha.Client
+	apple   catalog.Apple
+	shuffle func(n int, swap func(i, j int)) // rand.Shuffle; tests replace it
 }
 
 var _ player.Player = (*Player)(nil)
 
 // New returns a Sonos player. apple is used to queue artist songs.
-func New(c ha.Client, apple catalog.Apple) *Player { return &Player{ha: c, apple: apple} }
+func New(c ha.Client, apple catalog.Apple) *Player {
+	return &Player{ha: c, apple: apple, shuffle: rand.Shuffle}
+}
 
 func (p *Player) Name() string { return "sonos" }
 
@@ -50,6 +54,10 @@ func (p *Player) Supports(req player.Request) bool {
 // becomes a queue of its songs: the first replaces the queue, the rest are
 // added. The song lookup runs before media_stop, so a failed lookup leaves
 // the current music alone.
+//
+// Sonos starts a new queue at its first track even in shuffle mode, and a
+// queue replace resets repeat. So an artist's songs are shuffled here before
+// they are queued, and repeat and shuffle are set again at the end.
 func (p *Player) Play(ctx context.Context, req player.Request) error {
 	if !p.Supports(req) {
 		return fmt.Errorf("sonos: unsupported request (kind %q, entity %q)", req.Media.Kind, req.Area.SonosEntity)
@@ -67,6 +75,9 @@ func (p *Player) Play(ctx context.Context, req player.Request) error {
 		for _, s := range songs {
 			urls = append(urls, s.URL)
 		}
+		if req.Shuffle {
+			p.shuffle(len(urls), func(i, j int) { urls[i], urls[j] = urls[j], urls[i] })
+		}
 	}
 
 	repeat := req.Repeat
@@ -74,19 +85,16 @@ func (p *Player) Play(ctx context.Context, req player.Request) error {
 		repeat = "all"
 	}
 	target := &ha.Target{EntityID: []string{req.Area.SonosEntity}}
-	steps := []struct {
-		service string
-		data    map[string]any
-	}{
-		{"media_stop", nil},
-		{"volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}},
+	modes := []step{
 		{"repeat_set", map[string]any{"repeat": repeat}},
 		{"shuffle_set", map[string]any{"shuffle": req.Shuffle}},
 	}
-	for _, s := range steps {
-		if _, err := p.ha.CallService(ctx, "media_player", s.service, s.data, target, false); err != nil {
-			return fmt.Errorf("sonos: %w", err)
-		}
+	steps := append([]step{
+		{"media_stop", nil},
+		{"volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}},
+	}, modes...)
+	if err := p.run(ctx, target, steps); err != nil {
+		return err
 	}
 
 	for i, u := range urls {
@@ -99,6 +107,21 @@ func (p *Player) Play(ctx context.Context, req player.Request) error {
 		}
 		if _, err := p.ha.CallService(ctx, "media_player", "play_media", data, target, false); err != nil {
 			return fmt.Errorf("sonos: play_media %d/%d: %w", i+1, len(urls), err)
+		}
+	}
+	return p.run(ctx, target, modes)
+}
+
+// step is one media_player service call.
+type step struct {
+	service string
+	data    map[string]any
+}
+
+func (p *Player) run(ctx context.Context, target *ha.Target, steps []step) error {
+	for _, s := range steps {
+		if _, err := p.ha.CallService(ctx, "media_player", s.service, s.data, target, false); err != nil {
+			return fmt.Errorf("sonos: %w", err)
 		}
 	}
 	return nil

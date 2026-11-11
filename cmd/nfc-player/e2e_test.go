@@ -161,7 +161,7 @@ func TestEndToEnd(t *testing.T) {
 	}); n != 1 {
 		t.Fatalf("event reached %d connections", n)
 	}
-	waitFor(t, "five service calls", func() bool { return len(fake.ServiceCalls()) >= 5 })
+	waitFor(t, "seven service calls", func() bool { return len(fake.ServiceCalls()) >= 7 })
 
 	target := &ha.Target{EntityID: []string{"media_player.office"}}
 	url := "https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5"
@@ -171,6 +171,8 @@ func TestEndToEnd(t *testing.T) {
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target},
 		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": url, "media_content_type": "music"}, Target: target},
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target},
 	}
 	if got := fake.ServiceCalls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("service calls:\n got %+v\nwant %+v", got, want)
@@ -225,7 +227,7 @@ func TestEndToEndPlayEvents(t *testing.T) {
 	// Values as an HA template renders them.
 	url := "https://music.apple.com/us/album/divisive/1646032515"
 	srv.Emit(scan.PlayEventType, map[string]any{"area": "office", "media": url, "volume": "40", "shuffle": "false", "pool": ""})
-	waitFor(t, "five service calls", func() bool { return len(fake.ServiceCalls()) >= 5 })
+	waitFor(t, "seven service calls", func() bool { return len(fake.ServiceCalls()) >= 7 })
 	target := &ha.Target{EntityID: []string{"media_player.office"}}
 	want := []hatest.ServiceCall{
 		{Domain: "media_player", Service: "media_stop", Target: target},
@@ -233,6 +235,8 @@ func TestEndToEndPlayEvents(t *testing.T) {
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": false}, Target: target},
 		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": url, "media_content_type": "music"}, Target: target},
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": false}, Target: target},
 	}
 	if got := fake.ServiceCalls(); !reflect.DeepEqual(got, want) {
 		t.Errorf("service calls:\n got %+v\nwant %+v", got, want)
@@ -240,8 +244,8 @@ func TestEndToEndPlayEvents(t *testing.T) {
 
 	// Stop with nothing playing stops the Sonos entity.
 	srv.Emit(scan.StopEventType, map[string]any{"area": "office"})
-	waitFor(t, "media_stop", func() bool { return len(fake.ServiceCalls()) >= 6 })
-	if c := fake.ServiceCalls()[5]; c.Service != "media_stop" || !reflect.DeepEqual(c.Target, target) {
+	waitFor(t, "media_stop", func() bool { return len(fake.ServiceCalls()) >= 8 })
+	if c := fake.ServiceCalls()[7]; c.Service != "media_stop" || !reflect.DeepEqual(c.Target, target) {
 		t.Errorf("stop call = %+v", c)
 	}
 	var scans []model.Scan

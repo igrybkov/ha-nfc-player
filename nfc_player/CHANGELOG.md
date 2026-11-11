@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Shuffle on an artist tag now starts with a random song. Sonos always
+  started at the artist's top song.
+- Repeat and shuffle are set again after the queue is loaded on Sonos, since
+  loading a new queue turned repeat off.
+
 ## 0.2.0
 
 - Pools: named lists of tags and media in `pools.yaml`, edited on the new

@@ -43,6 +43,9 @@ func TestPlayAlbumSequence(t *testing.T) {
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "one"}, Target: target()},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target()},
 		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": url, "media_content_type": "music"}, Target: target()},
+		// Set again: a queue replace resets repeat.
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "one"}, Target: target()},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target()},
 	}
 	if !reflect.DeepEqual(f.Calls, want) {
 		t.Errorf("calls:\n got %+v\nwant %+v", f.Calls, want)
@@ -56,7 +59,7 @@ func TestPlayAppleMusicURIUsesShareLink(t *testing.T) {
 	if err := p.Play(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	last := f.Calls[len(f.Calls)-1]
+	last := f.Calls[4]
 	if got := last.Data["media_content_id"]; got != "https://music.apple.com/us/playlist/playlist-pl.abc/pl.abc" {
 		t.Errorf("media_content_id = %v", got)
 	}
@@ -88,6 +91,8 @@ func TestPlayArtistQueuesSongs(t *testing.T) {
 
 	f := &hatest.Fake{}
 	p := New(f, &catalog.ITunes{HTTP: srv.Client(), BaseURL: srv.URL})
+	// A fixed "shuffle": swap the first and last songs.
+	p.shuffle = func(n int, swap func(i, j int)) { swap(0, n-1) }
 	artist := "https://music.apple.com/us/artist/%D0%B2%D0%BE%D0%BB%D0%BE%D0%B4%D0%B8%D0%BC%D0%B8%D1%80-%D1%96%D0%B2%D0%B0%D1%81%D1%8E%D0%BA/1797008889"
 	req := player.Request{Media: mustParse(t, artist), Area: familyRoom, Volume: 25, Shuffle: true, Repeat: "all"}
 	if !p.Supports(req) {
@@ -106,9 +111,12 @@ func TestPlayArtistQueuesSongs(t *testing.T) {
 		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.25}, Target: target()},
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target()},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target()},
-		song("11", "replace"),
+		// Shuffled here: Sonos starts a new queue at its first song.
+		song("13", "replace"),
 		song("12", "add"),
-		song("13", "add"),
+		song("11", "add"),
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target()},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target()},
 	}
 	if !reflect.DeepEqual(f.Calls, want) {
 		t.Errorf("calls:\n got %+v\nwant %+v", f.Calls, want)

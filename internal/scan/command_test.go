@@ -76,6 +76,8 @@ func TestPlayEventSequence(t *testing.T) {
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "one"}, Target: target},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target},
 		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": metallicaURL, "media_content_type": "music"}, Target: target},
+		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "one"}, Target: target},
+		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target},
 	}
 	if got := hs.f.ServiceCalls(); !reflect.DeepEqual(got, wantCalls) {
 		t.Errorf("calls:\n got %+v\nwant %+v", got, wantCalls)
