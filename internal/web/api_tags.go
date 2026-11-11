@@ -151,6 +151,12 @@ func (s *Server) serveArtwork(w http.ResponseWriter, r *http.Request, e model.En
 	if size > 0 {
 		img = scale(img, size)
 	}
+	s.writeJPEG(w, r, img, refresh)
+}
+
+// writeJPEG serves img with an ETag, so browsers revalidate cheaply.
+// noStore is for a refresh, whose result must not be reused.
+func (s *Server) writeJPEG(w http.ResponseWriter, r *http.Request, img image.Image, noStore bool) {
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
 		s.writeErr(w, r, fmt.Errorf("encode artwork: %w", err))
@@ -159,7 +165,7 @@ func (s *Server) serveArtwork(w http.ResponseWriter, r *http.Request, e model.En
 	sum := sha256.Sum256(buf.Bytes())
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
-	if refresh {
+	if noStore {
 		w.Header().Set("Cache-Control", "no-store")
 	} else {
 		w.Header().Set("Cache-Control", "private, no-cache")

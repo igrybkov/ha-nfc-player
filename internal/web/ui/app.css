@@ -179,3 +179,11 @@ ul.error { margin: 0; padding-left: 18px; }
   .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .art { width: 160px; height: 160px; }
 }
+
+/* Art picker */
+.picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.pick { flex-direction: column; align-items: stretch; padding: 4px; gap: 4px; min-width: 0; }
+.pick img, .pick-auto { width: 100%; height: auto; aspect-ratio: 1; border-radius: 4px; object-fit: cover; background: var(--line); }
+.pick-auto { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.pick .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick[aria-pressed="true"] { border-color: var(--primary); outline: 2px solid var(--primary); }

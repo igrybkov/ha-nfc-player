@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/igrybkov/ha-nfc-player/internal/artwork"
 	"github.com/igrybkov/ha-nfc-player/internal/config"
 	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
@@ -211,6 +212,7 @@ type testEnv struct {
 	h        http.Handler
 	reg      *registry.Registry
 	pools    *pools.Store
+	picker   *fakePicker
 	settings *config.SettingsStore
 	play     *fakePlay
 	scans    *fakeScans
@@ -241,9 +243,10 @@ func newEnv(t *testing.T, supervisor bool) *testEnv {
 		lbl:      &fakeLabels{},
 	}
 	e.pools = pools.New(store.Open(filepath.Join(dir, config.PoolsFile), pools.DefaultFile), e.reg)
+	e.picker = &fakePicker{}
 	e.h = New(Deps{
 		Registry: e.reg, Pools: e.pools, Settings: e.settings, Templates: tpls, Backgrounds: bgs,
-		Play: e.play, Scans: e.scans, Artwork: e.art, HATags: e.tags, Labels: e.lbl,
+		Play: e.play, Scans: e.scans, Artwork: e.art, HATags: e.tags, Labels: e.lbl, ArtPicker: e.picker,
 		Supervisor: supervisor,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}).Handler()
@@ -1169,4 +1172,62 @@ func TestPrintPools(t *testing.T) {
 		t.Fatalf("disposition %q", cd)
 	}
 	wantJSONError(t, e.do(t, "POST", "/api/print/preview", printRequest{EntryIDs: []string{"pool:nope"}, TemplateID: "avery-5260"}), http.StatusNotFound)
+}
+
+type fakePicker struct{ previews []string }
+
+func (f *fakePicker) Candidates(_ context.Context, e model.Entry) ([]artwork.Candidate, error) {
+	return []artwork.Candidate{{URL: "https://art/" + e.ID, Label: "Cover", Kind: artwork.KindCover},
+		{URL: "https://art/artist", Label: "Artist", Kind: artwork.KindArtist}}, nil
+}
+
+func (f *fakePicker) SourceURL(_ context.Context, e model.Entry) (string, error) {
+	if e.Label.Artwork != nil {
+		return *e.Label.Artwork, nil
+	}
+	if e.URL == "" {
+		return "", errors.New("no art")
+	}
+	return "https://art/" + e.URL, nil
+}
+
+func (f *fakePicker) Preview(_ context.Context, u string) (image.Image, error) {
+	f.previews = append(f.previews, u)
+	if u == "" {
+		return nil, errors.New("blocked")
+	}
+	return image.NewRGBA(image.Rect(0, 0, 300, 300)), nil
+}
+
+func TestArtPicker(t *testing.T) {
+	e := newEnv(t, false)
+	file := "covers/a.jpg"
+	a := e.mustCreate(t, model.Entry{Name: "A", URL: "apple_music://album/1"})
+	b := e.mustCreate(t, model.Entry{Name: "B", URL: "apple_music://album/2", Label: model.LabelOverrides{Artwork: &file}})
+	if _, err := e.pools.Create(model.Pool{Name: "Mix", Items: []model.PoolItem{{Tag: a.ID}, {Tag: b.ID}, {Media: "Some name"}, {Media: "apple_music://album/1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	pt := e.mustCreate(t, model.Entry{Name: "Mix tag", Pool: "mix"})
+
+	got := decode[[]pickerItem](t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates", nil))
+	if len(got) != 2 || got[0].URL != "https://art/"+a.ID || got[0].Preview != "api/artwork/preview?url=https%3A%2F%2Fart%2F"+a.ID {
+		t.Fatalf("entry candidates %+v", got)
+	}
+	// Pool items in order; the file override previews through its tag; the
+	// name item has no art; the duplicate URL shows once.
+	for _, path := range []string{"/api/pools/mix/artwork/candidates", "/api/tags/" + pt.ID + "/artwork/candidates"} {
+		got = decode[[]pickerItem](t, e.do(t, "GET", path, nil))
+		if len(got) != 2 || got[0].Label != "A" || got[1].URL != file || got[1].Preview != "api/tags/"+b.ID+"/artwork" {
+			t.Fatalf("%s: %+v", path, got)
+		}
+	}
+	wantJSONError(t, e.do(t, "GET", "/api/pools/nope/artwork/candidates", nil), http.StatusNotFound)
+
+	w := e.do(t, "GET", "/api/artwork/preview?url=https%3A%2F%2Fart%2Fx&size=64", nil)
+	wantStatus(t, w, http.StatusOK)
+	if e.picker.previews[0] != "https://art/x" {
+		t.Fatalf("previews %v", e.picker.previews)
+	}
+	wantJSONError(t, e.do(t, "GET", "/api/artwork/preview", nil), http.StatusNotFound)
+	wantJSONError(t, e.do(t, "GET", "/api/artwork/preview?url=x&size=1", nil), http.StatusBadRequest)
 }

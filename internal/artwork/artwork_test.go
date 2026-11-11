@@ -37,6 +37,7 @@ type fakeApple struct {
 	gate   chan struct{}     // when set, /search waits for it to close
 	status int               // when set, /search and /lookup answer with it
 	oembed map[string]string // Spotify share URL → thumbnail_url; missing = 404
+	bodies map[string]string // path → raw HTML, served before pages
 }
 
 func newFakeApple(t *testing.T) *fakeApple {
@@ -85,6 +86,8 @@ func (f *fakeApple) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 	case strings.HasPrefix(r.URL.Path, "/img/"):
 		w.Write(pngBytes(f.t, 120, 80))
+	case f.bodies[r.URL.Path] != "":
+		w.Write([]byte(f.bodies[r.URL.Path]))
 	default:
 		og, ok := f.pages[r.URL.Path]
 		if !ok {

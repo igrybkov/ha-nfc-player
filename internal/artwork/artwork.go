@@ -130,6 +130,9 @@ type Cache struct {
 	flights  map[string]*flight   // resolutions in progress, by entry key
 	failed   map[string]time.Time // when the chain last found nothing, by entry key
 	now      func() time.Time     // clock; tests replace it
+
+	candMu     sync.Mutex
+	candidates map[string]candidateSet // art picker results, by entry key
 }
 
 // flight is one resolution that concurrent callers for the same key wait on.

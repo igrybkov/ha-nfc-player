@@ -11,6 +11,9 @@
   pool's.
 - **Print** lists pools next to tags. A pool label prints the pool's name,
   so a tag written with that name plays the pool.
+- **Choose image…** under a label's artwork picks the art from a list: an
+  Apple Music album or playlist offers its cover and its artists' photos,
+  a pool offers its items' art. Spotify offers its cover only.
 
 ## 0.3.1
 

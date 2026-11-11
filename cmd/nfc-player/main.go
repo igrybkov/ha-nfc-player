@@ -137,15 +137,17 @@ func run(ctx context.Context, cfg config.Config, ln net.Listener, opts options) 
 	})
 
 	art := opts.Artwork
+	var picker web.ArtPicker
 	if art == nil {
-		art = &artwork.Cache{Dir: filepath.Join(cfg.DataDir, "cache"), ConfigDir: cfg.ConfigDir, Logger: log}
+		cache := &artwork.Cache{Dir: filepath.Join(cfg.DataDir, "cache"), ConfigDir: cfg.ConfigDir, Logger: log}
+		art, picker = cache, cache
 	}
 	// A pool tag shows the art of its pool's first item.
 	art = &pools.Artwork{Pools: poolStore, Source: art}
 
 	srv := web.New(web.Deps{
 		Registry: tags, Pools: poolStore, Settings: settings, Templates: templates, Backgrounds: backgrounds,
-		Play: handler, Scans: scans, Artwork: art, HATags: client,
+		Play: handler, Scans: scans, Artwork: art, HATags: client, ArtPicker: picker,
 		Supervisor: cfg.Supervisor, Logger: log,
 	})
 	httpSrv := &http.Server{

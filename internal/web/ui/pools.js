@@ -1,7 +1,7 @@
 // Pools screen: pool list with a play box, and the pool editor.
 import {
   h, get, post, put, del, toast, run, highlight, thumb, bumpArt, searchList, artURL, poolEntry,
-  field, num, readNum, select, confirmDelete, focusIfDesktop, playerNames, areaSelect, splitName,
+  field, num, readNum, select, confirmDelete, focusIfDesktop, playerNames, areaSelect, splitName, artPicker, sized,
 } from './lib.js';
 
 // ALL is the built-in pool of every tag. The API lists stored pools only.
@@ -278,7 +278,12 @@ async function editor(view, id, params) {
         itemList),
       h('fieldset', {}, h('legend', { text: 'Label' }),
         field('Title', title), field('Subtitle', subtitle),
-        field('Artwork', artwork, 'Image URL or a path under the config dir. Pool tags without art of their own use it too.'))),
+        field('Artwork', artwork, 'Image URL or a path under the config dir. Pool tags without art of their own use it too.'),
+        id && artPicker({
+          path: `api/pools/${encodeURIComponent(id)}/artwork/candidates`,
+          input: artwork,
+          onPick: (preview) => { art.classList.remove('missing'); art.src = preview ? sized(preview, 400) : artURL(poolEntry(pool), 400); },
+        }))),
     h('div', { class: 'stack' },
       id && h('div', { class: 'art-box' }, art,
         h('button', { type: 'button', text: 'Refresh art', onclick: () => showArt(true) })),

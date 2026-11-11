@@ -1,7 +1,7 @@
 // Tags screen: searchable entry list and the entry editor.
 import {
   h, get, post, put, del, toast, run, highlight, thumb, artURL, bumpArt, searchList,
-  field, num, readNum, select, confirmDelete, splitName, focusIfDesktop, playerNames, areaSelect,
+  field, num, readNum, select, confirmDelete, splitName, focusIfDesktop, playerNames, areaSelect, artPicker, sized,
 } from './lib.js';
 import { ALL, poolName } from './pools.js';
 
@@ -195,7 +195,12 @@ async function editor(view, id, params) {
         chips, picker),
       h('fieldset', {}, h('legend', { text: 'Label' }),
         field('Title', title), field('Subtitle', subtitle),
-        field('Artwork', artwork, 'Image URL or a path under the config dir.'))),
+        field('Artwork', artwork, 'Image URL or a path under the config dir.'),
+        entry.id && artPicker({
+          path: `api/tags/${encodeURIComponent(entry.id)}/artwork/candidates`,
+          input: artwork,
+          onPick: (preview) => { art.classList.remove('missing'); art.src = preview ? sized(preview, 400) : artURL(entry, 400); },
+        }))),
     h('div', { class: 'stack' },
       entry.id && h('div', { class: 'art-box' }, art,
         h('button', { type: 'button', text: 'Refresh art', onclick: () => showArt(true) })),

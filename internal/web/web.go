@@ -46,6 +46,7 @@ type Deps struct {
 	Scans       model.ScanLog
 	Artwork     model.ArtworkSource
 	HATags      TagLister
+	ArtPicker   ArtPicker // nil = no art picker (routes answer 503)
 	Labels      Labels // nil = package labels
 	Supervisor  bool   // accept only 172.30.32.2 and localhost
 	Logger      *slog.Logger
@@ -68,6 +69,17 @@ func New(d Deps) *Server {
 		s.lbl = labelsPkg{}
 	}
 	return s
+}
+
+// needPicker answers 503 when no ArtPicker is wired.
+func (s *Server) needPicker(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.ArtPicker == nil {
+			writeError(w, http.StatusServiceUnavailable, "art picker not available")
+			return
+		}
+		h(w, r)
+	}
 }
 
 // Timeouts for calls into other components.
@@ -99,6 +111,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/pools/{id}", s.updatePool)
 	mux.HandleFunc("DELETE /api/pools/{id}", s.deletePool)
 	mux.HandleFunc("GET /api/pools/{id}/artwork", s.poolArtwork)
+	mux.HandleFunc("GET /api/pools/{id}/artwork/candidates", s.needPicker(s.poolArtCandidates))
+	mux.HandleFunc("GET /api/tags/{id}/artwork/candidates", s.needPicker(s.tagArtCandidates))
+	mux.HandleFunc("GET /api/artwork/preview", s.needPicker(s.artPreview))
 	mux.HandleFunc("POST /api/play", s.play)
 	mux.HandleFunc("POST /api/stop", s.stop)
 
