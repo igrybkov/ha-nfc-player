@@ -356,10 +356,43 @@ func normalize(r *model.Record) {
 
 // applyDefaults fills values missing from hand-written files.
 func applyDefaults(r *model.Record) {
-	if r.Items == nil {
-		r.Items = []model.RecordItem{}
-	}
+	r.Items = dedupe(r.Items)
 	if r.Aliases == nil {
 		r.Aliases = []string{}
 	}
+}
+
+// dedupe keeps the first of items that play the same thing, in order.
+// It runs on every read and save, so a file with duplicates plays without
+// them and loses them on its next save.
+func dedupe(items []model.RecordItem) []model.RecordItem {
+	out := make([]model.RecordItem, 0, len(items))
+	seen := map[string]bool{}
+	for _, it := range items {
+		k := ItemKey(it)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, it)
+	}
+	return out
+}
+
+// ItemKey says what an item plays, so two items with the same key are the
+// same: a record by id; a link by service, kind and catalog id, so share
+// parameters (?si=) and slugs don't count; other text without regard to
+// case and spacing.
+func ItemKey(it model.RecordItem) string {
+	if it.Record != "" {
+		return "record:" + it.Record
+	}
+	if m, err := catalog.Parse(it.Media); err == nil {
+		svc := m.Service
+		if svc == "" {
+			svc = catalog.ServiceAppleMusic
+		}
+		return fmt.Sprintf("media:%s:%s:%s", svc, m.Kind, m.ID)
+	}
+	return "text:" + strings.ToLower(strings.Join(strings.Fields(it.Media), " "))
 }

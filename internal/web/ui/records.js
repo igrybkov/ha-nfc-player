@@ -15,6 +15,25 @@ const editURL = (id) => `#/records/edit/${encodeURIComponent(id)}`;
 // isURL mirrors records.IsURL: such media text is a link with art of its own.
 const isURL = (m) => /^(https?:\/\/|(apple_music|spotify)(--[a-z0-9]+)?:\/\/|spotify:[a-z]+:)/i.test(m.trim());
 
+// itemKey mirrors records.ItemKey closely enough to stop an obvious
+// duplicate: a record by id, a link by its kind and last id (no query,
+// slug or /intl-xx), other text without case or extra spaces. The server
+// drops any duplicate this misses when the record is saved.
+function itemKey(it) {
+  if (it.record) return `record:${it.record}`;
+  const m = it.media.trim();
+  if (isURL(m)) {
+    try {
+      const u = new URL(m.replace(/^(apple_music|spotify)(--[a-z0-9]+)?:\/\//i, 'https://x/'));
+      const parts = u.pathname.split('/').filter((p) => p && !/^intl-/.test(p));
+      const song = u.searchParams.get('i');
+      const kind = parts.find((p) => /^(album|playlist|artist|song|track|station)$/.test(p)) ?? '';
+      return `media:${u.hostname}:${song ? `song/${song}` : `${kind}/${parts.at(-1)}`}`;
+    } catch { /* not a URL after all: compare as text */ }
+  }
+  return `text:${m.toLowerCase().split(/\s+/).join(' ')}`;
+}
+
 // mediaThumb is the art of a media link, as thumb() shows a record's.
 function mediaThumb(media, size = 32) {
   const img = h('img', {
@@ -225,6 +244,17 @@ async function editor(view, id, params) {
   }
   drawItems();
 
+  // add appends an item unless the list already plays the same thing.
+  const add = (it) => {
+    if (items.some((x) => itemKey(x) === itemKey(it))) {
+      toast('Already in the list', 'error');
+      return false;
+    }
+    items.push(it);
+    drawItems();
+    return true;
+  };
+
   const picker = searchList({
     items: byName(records.filter((r) => r.id !== id)),
     text: (r) => r.name,
@@ -232,8 +262,7 @@ async function editor(view, id, params) {
     empty: 'No other records yet.',
     row: (r, pos) => h('div', { class: 'row' }, thumb(r, 32), h('div', { class: 'grow title' }, highlight(r.name, pos))),
     onEnter: (r) => {
-      items.push({ record: r.id });
-      drawItems();
+      if (!add({ record: r.id })) return;
       toast(`Added ${r.name}`);
     },
   });
@@ -241,10 +270,8 @@ async function editor(view, id, params) {
   const media = h('input', { autocomplete: 'off', spellcheck: 'false', placeholder: 'URL, Artist — Album, or a name' });
   const addMedia = () => {
     const v = media.value.trim();
-    if (!v) return;
-    items.push({ media: v });
+    if (!v || !add({ media: v })) return;
     media.value = '';
-    drawItems();
   };
   media.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addMedia(); }

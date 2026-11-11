@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- A record holds each item once. Links that point to the same album,
+  playlist or artist count as one, whatever their share parameters, and
+  names match without regard to case or spacing. The editor refuses a
+  duplicate; a file with duplicates plays without them and drops them on
+  the next save.
+
 ## 0.4.1
 
 - A record's volume is now an offset from the room's volume (-100 to

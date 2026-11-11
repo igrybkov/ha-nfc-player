@@ -162,8 +162,10 @@ records:
 - A play picks one item at random. If that item is a record, it picks one
   of that record's items, and so on down. So in a record of five artists,
   each artist gets one play in five, however many albums it holds. The
-  same item is not picked twice in a row when there is another. List an
-  item twice to give it more weight.
+  same item is not picked twice in a row when there is another.
+- A record holds each item once. Two links to the same album count as
+  one, even with different share parameters (`?si=...`). The editor says
+  so when you add one again, and a hand-edited duplicate is dropped.
 - The settings of the record you play apply, also to an item picked from
   inside another record. Shuffle depends on the kind of media picked.
 - `aliases` are old ids: the old tag and pool ids from app 0.3, and ids

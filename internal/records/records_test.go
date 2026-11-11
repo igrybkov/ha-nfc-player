@@ -251,3 +251,28 @@ func TestShuffleDefaults(t *testing.T) {
 		t.Error("albums override")
 	}
 }
+
+func TestDedupe(t *testing.T) {
+	s := newStore(t)
+	r := mustCreate(t, s, model.Record{Name: "FFDP", Items: []model.RecordItem{
+		{Media: artistURL},
+		{Media: artistURL + "?l=en"},
+		{Media: "Cat Stevens — Teaser"},
+		{Media: "  cat stevens —   teaser "},
+		{Media: "https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy?si=1"},
+		{Media: "https://open.spotify.com/intl-de/album/4aawyAB9vmqN3uQ7FjRGTy"},
+		{Media: listURL},
+	}})
+	if len(r.Items) != 4 || r.Items[0].Media != artistURL || r.Items[3].Media != listURL {
+		t.Fatalf("items %+v", r.Items)
+	}
+
+	// A file written with duplicates reads without them.
+	f := store.Open(filepath.Join(t.TempDir(), FileName), DefaultFile)
+	if err := f.Save(File{Records: []model.Record{{ID: "x", Name: "X", Items: media(albumURL, albumURL)}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := New(f).Get("x"); len(got.Items) != 1 {
+		t.Errorf("read %+v", got.Items)
+	}
+}
