@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- **Unknown scans → Rename** renames the tag in Home Assistant. The row
+  then shows the new name, and **Create entry** starts with it.
+
 ## 0.3.1
 
 - Pick the default background on the Backgrounds screen (**Make default**).

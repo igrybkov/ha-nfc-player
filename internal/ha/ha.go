@@ -502,6 +502,14 @@ func (c *WSClient) Tags(ctx context.Context) ([]Tag, error) {
 	return list[Tag](ctx, c, "tag/list")
 }
 
+// RenameTag sets the name of an HA tag ("tag/update").
+func (c *WSClient) RenameTag(ctx context.Context, tagID, name string) error {
+	if _, err := c.request(ctx, map[string]any{"type": "tag/update", "tag_id": tagID, "name": name}); err != nil {
+		return fmt.Errorf("tag/update: %w", err)
+	}
+	return nil
+}
+
 // cachedList serves a registry from cache. It waits for a connection first:
 // the caches are dropped on connect, so a fetch started earlier would be
 // thrown away.

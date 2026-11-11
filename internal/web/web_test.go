@@ -120,6 +120,19 @@ type fakeTags struct {
 
 func (f *fakeTags) Tags(context.Context) ([]ha.Tag, error) { return f.tags, f.err }
 
+func (f *fakeTags) RenameTag(_ context.Context, id, name string) error {
+	if f.err != nil {
+		return f.err
+	}
+	for i := range f.tags {
+		if f.tags[i].ID == id {
+			f.tags[i].Name = name
+			return nil
+		}
+	}
+	return &ha.Error{Code: "not_found", Message: "Unable to find tag_id"}
+}
+
 type fakeLayout struct{}
 
 func (fakeLayout) ID() string   { return "web-test" }
@@ -594,6 +607,27 @@ func TestHATags(t *testing.T) {
 	wantJSONError(t, e.do(t, "GET", "/api/ha/tags", nil), http.StatusBadGateway)
 }
 
+func TestRenameHATag(t *testing.T) {
+	e := newEnv(t, false)
+	en := e.mustCreate(t, model.Entry{Name: "Ghost — Impera", URL: "apple_music://album/1"})
+	e.tags.tags = []ha.Tag{{ID: "t1", Name: "Tag 1a2b"}}
+
+	w := e.do(t, "PUT", "/api/ha/tags/t1", map[string]any{"name": "  Ghost — Impera "})
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[haTag](t, w); got.Name != "Ghost — Impera" || got.EntryID != en.ID {
+		t.Fatalf("got %+v", got)
+	}
+	if e.tags.tags[0].Name != "Ghost — Impera" {
+		t.Fatalf("HA tag %+v", e.tags.tags[0])
+	}
+
+	wantJSONError(t, e.do(t, "PUT", "/api/ha/tags/t1", map[string]any{"name": " "}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "PUT", "/api/ha/tags/t1", map[string]any{"name": strings.Repeat("x", 201)}), http.StatusBadRequest)
+	wantJSONError(t, e.do(t, "PUT", "/api/ha/tags/nope", map[string]any{"name": "x"}), http.StatusNotFound)
+	e.tags.err = errors.New("disconnected")
+	wantJSONError(t, e.do(t, "PUT", "/api/ha/tags/t1", map[string]any{"name": "x"}), http.StatusBadGateway)
+}
+
 func TestHAAreas(t *testing.T) {
 	e := newEnv(t, false)
 	w := e.do(t, "GET", "/api/ha/areas", nil)
@@ -629,6 +663,14 @@ func TestScans(t *testing.T) {
 	if got[0]["source"] != "event" || got[0]["pool_id"] != "kitchen" || got[0]["result"] != "stopped" {
 		t.Fatalf("event scan %+v", got[0])
 	}
+
+	// A tag renamed in HA shows and resolves by its new name.
+	e.tags.tags = []ha.Tag{{ID: "x", Name: "Old"}}
+	got = decode[[]map[string]any](t, e.do(t, "GET", "/api/scans", nil))
+	if last := got[len(got)-1]; last["tag_name"] != "New Album" || last["ha_name"] != "Old" || last["matches_entry"] != en.ID {
+		t.Fatalf("renamed scan %+v", last)
+	}
+	e.tags.tags = nil
 
 	// An event's description is not a tag name, even when it equals one.
 	e.scans.Add(model.Scan{Source: model.SourceUI, TagName: "Old", Media: "Old", Result: model.ScanNoMatch})

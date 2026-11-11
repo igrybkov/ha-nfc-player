@@ -86,6 +86,8 @@ Content-Security-Policy and can only be framed by Home Assistant itself.
 - **Pools**: lists of music to pick from at random, and a play box (see
   below).
 - **Unknown scans**: recent scans that matched nothing, with **Create entry**.
+  **Rename** sets the tag's name in Home Assistant, so a new tag gets a
+  real name before you create its entry.
   **All recent scans** below it shows every scan, event and UI play with
   its result and error.
 - **Print**: make a label PDF (see below).

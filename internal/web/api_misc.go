@@ -2,9 +2,13 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/igrybkov/ha-nfc-player/internal/ha"
 	"github.com/igrybkov/ha-nfc-player/internal/labels"
 	"github.com/igrybkov/ha-nfc-player/internal/model"
 )
@@ -31,6 +35,41 @@ func (s *Server) haTags(w http.ResponseWriter, r *http.Request) {
 		out = append(out, haTag{ID: t.ID, Name: t.Name, LastScanned: t.LastScanned, EntryID: s.resolve(t.ID, t.Name)})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// maxTagName caps a new HA tag name. HA sets no limit; this only stops junk.
+const maxTagName = 200
+
+// renameHATag renames an HA tag, so a new tag can get its name from the
+// Unknown scans screen. It returns the tag as haTags lists it.
+func (s *Server) renameHATag(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.writeErr(w, r, err)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" || utf8.RuneCountInString(name) > maxTagName {
+		writeError(w, http.StatusBadRequest, "name must be 1 to 200 characters")
+		return
+	}
+	id := r.PathValue("id")
+	ctx, cancel := context.WithTimeout(r.Context(), haTimeout)
+	defer cancel()
+	if err := s.deps.HATags.RenameTag(ctx, id, name); err != nil {
+		var haErr *ha.Error
+		if errors.As(err, &haErr) && haErr.Code == "not_found" {
+			writeError(w, http.StatusNotFound, "Home Assistant has no tag "+id)
+			return
+		}
+		s.log.Warn("web: rename HA tag", "tag_id", id, "err", err)
+		writeError(w, http.StatusBadGateway, "Home Assistant: "+err.Error())
+		return
+	}
+	s.log.Info("web: renamed HA tag", "tag_id", id, "name", name)
+	writeJSON(w, http.StatusOK, haTag{ID: id, Name: name, EntryID: s.resolve(id, name)})
 }
 
 // resolve mirrors the scan matching order: tag id, then normalized name.
@@ -62,22 +101,47 @@ func (s *Server) haAreas(w http.ResponseWriter, r *http.Request) {
 // scanView is a scan plus the entry it resolves to now. An unknown scan
 // stops being unknown once an entry for it exists. Only tag scans resolve:
 // for events and UI commands TagName is a description, not an HA tag name.
+// HAName is the tag's name in HA now, which differs from TagName after a
+// rename; it is empty when HA is unreachable.
 type scanView struct {
 	model.Scan
+	HAName       string `json:"ha_name,omitempty"`
 	MatchesEntry string `json:"matches_entry"`
 }
 
-func (s *Server) scans(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) scans(w http.ResponseWriter, r *http.Request) {
 	recent := s.deps.Scans.Recent()
+	names := s.haTagNames(r.Context())
 	out := make([]scanView, 0, len(recent))
 	for _, sc := range recent {
 		v := scanView{Scan: sc}
 		if sc.Source == "" || sc.Source == model.SourceTag {
-			v.MatchesEntry = s.resolve(sc.TagID, sc.TagName)
+			name := sc.TagName
+			if n, ok := names[sc.TagID]; ok {
+				v.HAName, name = n, n
+			}
+			v.MatchesEntry = s.resolve(sc.TagID, name)
 		}
 		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// haTagNames maps HA tag ids to their names now. It is nil when HA does not
+// answer; the scans list then shows the names recorded at scan time.
+func (s *Server) haTagNames(ctx context.Context) map[string]string {
+	ctx, cancel := context.WithTimeout(ctx, haNamesTimeout)
+	defer cancel()
+	tags, err := s.deps.HATags.Tags(ctx)
+	if err != nil {
+		s.log.Warn("web: list HA tags for scans", "err", err)
+		return nil
+	}
+	names := make(map[string]string, len(tags))
+	for _, t := range tags {
+		names[t.ID] = t.Name
+	}
+	return names
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {

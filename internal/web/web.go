@@ -20,9 +20,10 @@ import (
 	"github.com/igrybkov/ha-nfc-player/internal/registry"
 )
 
-// TagLister lists the HA tag registry. ha.Client satisfies it.
+// TagLister lists and renames HA tags. ha.WSClient satisfies it.
 type TagLister interface {
 	Tags(ctx context.Context) ([]ha.Tag, error)
+	RenameTag(ctx context.Context, tagID, name string) error
 }
 
 // Labels is the part of the label engine the server uses. Nil in Deps means
@@ -72,6 +73,7 @@ func New(d Deps) *Server {
 // Timeouts for calls into other components.
 const (
 	haTimeout      = 10 * time.Second
+	haNamesTimeout = 3 * time.Second // scans list: show recorded names rather than wait
 	playTimeout    = 30 * time.Second
 	artworkTimeout = 20 * time.Second
 	printTimeout   = 90 * time.Second
@@ -100,6 +102,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/stop", s.stop)
 
 	mux.HandleFunc("GET /api/ha/tags", s.haTags)
+	mux.HandleFunc("PUT /api/ha/tags/{id}", s.renameHATag)
 	mux.HandleFunc("GET /api/ha/areas", s.haAreas)
 	mux.HandleFunc("GET /api/scans", s.scans)
 

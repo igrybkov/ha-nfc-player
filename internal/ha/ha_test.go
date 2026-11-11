@@ -130,6 +130,12 @@ func (f *fakeHA) handle(w http.ResponseWriter, r *http.Request) {
 			ok([]map[string]any{{"entity_id": "media_player.office", "state": "idle", "attributes": map[string]any{"volume_level": 0.2}, "last_changed": "2026-11-10T10:00:00+00:00"}})
 		case "tag/list":
 			ok([]map[string]any{{"id": "tag-1", "name": "Metallica — Essential", "last_scanned": nil}})
+		case "tag/update":
+			if cmd["tag_id"] != "tag-1" {
+				write(map[string]any{"id": id, "type": "result", "success": false, "error": map[string]any{"code": "not_found", "message": "Unable to find tag_id"}})
+				continue
+			}
+			ok(map[string]any{"id": "tag-1", "name": cmd["name"]})
 		case "call_service":
 			f.mu.Lock()
 			serr := f.serviceErr
@@ -269,6 +275,25 @@ func TestRegistriesAndStates(t *testing.T) {
 	tags, err := c.Tags(ctx)
 	if err != nil || len(tags) != 1 || tags[0].Name != "Metallica — Essential" || tags[0].LastScanned != nil {
 		t.Fatalf("Tags = %+v, %v", tags, err)
+	}
+}
+
+func TestRenameTag(t *testing.T) {
+	f := newFakeHA(t)
+	c, _, _ := startClient(t, f, testToken)
+	ctx := testCtx(t)
+
+	if err := c.RenameTag(ctx, "tag-1", "Ghost — Impera"); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	last := f.commands[len(f.commands)-1]
+	f.mu.Unlock()
+	if last["type"] != "tag/update" || last["tag_id"] != "tag-1" || last["name"] != "Ghost — Impera" {
+		t.Fatalf("sent %v", last)
+	}
+	if err := c.RenameTag(ctx, "nope", "x"); err == nil || !strings.Contains(err.Error(), "Unable to find") {
+		t.Fatalf("unknown tag: %v", err)
 	}
 }
 

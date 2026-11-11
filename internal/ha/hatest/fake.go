@@ -125,3 +125,17 @@ func (f *Fake) Devices(ctx context.Context) ([]ha.Device, error)  { return f.Dev
 func (f *Fake) Entities(ctx context.Context) ([]ha.Entity, error) { return f.EntityList, nil }
 func (f *Fake) States(ctx context.Context) ([]ha.State, error)    { return f.StateList, nil }
 func (f *Fake) Tags(ctx context.Context) ([]ha.Tag, error)        { return f.TagList, nil }
+
+// renameTag renames a tag in TagList, as "tag/update" does. It reports
+// whether the tag exists.
+func (f *Fake) renameTag(id, name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.TagList {
+		if f.TagList[i].ID == id {
+			f.TagList[i].Name = name
+			return true
+		}
+	}
+	return false
+}

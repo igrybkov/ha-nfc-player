@@ -100,6 +100,8 @@ type command struct {
 	ServiceData    map[string]any `json:"service_data"`
 	Target         *ha.Target     `json:"target"`
 	ReturnResponse bool           `json:"return_response"`
+	TagID          string         `json:"tag_id"`
+	Name           string         `json:"name"`
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +184,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			ok(orEmpty(f.StateList))
 		case "tag/list":
 			ok(orEmpty(f.TagList))
+		case "tag/update":
+			if !f.renameTag(cmd.TagID, cmd.Name) {
+				fail("not_found", "Unable to find tag_id")
+				continue
+			}
+			ok(map[string]any{"id": cmd.TagID, "name": cmd.Name})
 		case "call_service":
 			resp, err := f.CallService(ctx, cmd.Domain, cmd.Service, cmd.ServiceData, cmd.Target, cmd.ReturnResponse)
 			if err != nil {
