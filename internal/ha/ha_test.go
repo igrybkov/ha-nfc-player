@@ -286,11 +286,17 @@ func TestRenameTag(t *testing.T) {
 	if err := c.RenameTag(ctx, "tag-1", "Ghost — Impera"); err != nil {
 		t.Fatal(err)
 	}
+	// Other commands (subscriptions) go out on their own, so find ours.
+	var sent map[string]any
 	f.mu.Lock()
-	last := f.commands[len(f.commands)-1]
+	for _, cmd := range f.commands {
+		if cmd["type"] == "tag/update" {
+			sent = cmd
+		}
+	}
 	f.mu.Unlock()
-	if last["type"] != "tag/update" || last["tag_id"] != "tag-1" || last["name"] != "Ghost — Impera" {
-		t.Fatalf("sent %v", last)
+	if sent["tag_id"] != "tag-1" || sent["name"] != "Ghost — Impera" {
+		t.Fatalf("sent %v", sent)
 	}
 	if err := c.RenameTag(ctx, "nope", "x"); err == nil || !strings.Contains(err.Error(), "Unable to find") {
 		t.Fatalf("unknown tag: %v", err)

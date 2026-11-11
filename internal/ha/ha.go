@@ -1,7 +1,5 @@
 // Package ha is the Home Assistant websocket client: auth, events, service
 // calls and registry lookups over one connection.
-//
-// Owner: track A (docs/PLAN.md section 10).
 package ha
 
 import (

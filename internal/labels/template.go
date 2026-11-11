@@ -1,7 +1,7 @@
 // Package labels renders label sheets to PDF: templates, backgrounds,
 // pluggable layouts, slot math and the PDF canvas.
 //
-// Owner: track B (docs/PLAN.md section 10). The geometry is a port of
+// The geometry is a port of
 // docs/reference/nfc-music-labels.py, which was tuned against real paper.
 //
 // # Coordinates

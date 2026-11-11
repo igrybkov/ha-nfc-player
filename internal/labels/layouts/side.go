@@ -1,8 +1,6 @@
 // Package layouts holds the built-in label layouts. Each registers itself
 // with labels.RegisterLayout in init; blank-import this package to use them.
 // To add a layout, add one file here; see the labels package doc.
-//
-// Owner: track B (docs/PLAN.md section 10).
 package layouts
 
 import "github.com/igrybkov/ha-nfc-player/internal/labels"

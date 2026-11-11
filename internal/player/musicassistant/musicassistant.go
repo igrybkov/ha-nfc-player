@@ -1,6 +1,4 @@
 // Package musicassistant plays media through music_assistant.* services.
-//
-// Owner: track A (docs/PLAN.md section 10).
 package musicassistant
 
 import (

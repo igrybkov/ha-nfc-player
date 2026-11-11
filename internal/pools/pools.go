@@ -1,7 +1,5 @@
 // Package pools is the pool store (pools.yaml): validation, slugs and CRUD.
 // It implements model.PoolLookup and wraps artwork for pool entries.
-//
-// Owner: track A (docs/PLAN.md section 13).
 package pools
 
 import (

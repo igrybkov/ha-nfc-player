@@ -320,8 +320,9 @@ on the sheet to start there; used slots stay empty. **Generate PDF** opens
 the PDF; print it at 100% (no scaling).
 
 **Choose image…** under a tag's or pool's artwork shows images to pick
-from. An Apple Music album or playlist offers its cover and the photos of
-up to 8 of its artists. A pool offers the art of its items. A Spotify link
+from. An Apple Music link offers its cover, then the artists, albums and
+playlists its page links to, the most linked first; more load as you
+scroll. A pool offers the art of its items. A Spotify link
 offers its cover only. The pick fills the artwork field; press **Save**.
 
 If a picked tag has no cover art, a warning under the sheet names it before

@@ -1,7 +1,5 @@
 // Package player defines the Player interface and the Router that walks the
 // player chain with fallback.
-//
-// Owner: track A (docs/PLAN.md section 10).
 package player
 
 import (

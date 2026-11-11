@@ -1176,9 +1176,12 @@ func TestPrintPools(t *testing.T) {
 
 type fakePicker struct{ previews []string }
 
-func (f *fakePicker) Candidates(_ context.Context, e model.Entry) ([]artwork.Candidate, error) {
-	return []artwork.Candidate{{URL: "https://art/" + e.ID, Label: "Cover", Kind: artwork.KindCover},
-		{URL: "https://art/artist", Label: "Artist", Kind: artwork.KindArtist}}, nil
+func (f *fakePicker) Candidates(_ context.Context, e model.Entry, offset, limit int) (artwork.CandidatePage, error) {
+	if offset > 0 {
+		return artwork.CandidatePage{Items: []artwork.Candidate{{URL: "https://art/more", Label: "More", Kind: artwork.KindAlbum}}, Next: -1}, nil
+	}
+	return artwork.CandidatePage{Items: []artwork.Candidate{{URL: "https://art/" + e.ID, Label: "Cover", Kind: artwork.KindCover},
+		{URL: "https://art/artist", Label: "Artist", Kind: artwork.KindArtist}}, Next: limit}, nil
 }
 
 func (f *fakePicker) SourceURL(_ context.Context, e model.Entry) (string, error) {
@@ -1209,14 +1212,19 @@ func TestArtPicker(t *testing.T) {
 	}
 	pt := e.mustCreate(t, model.Entry{Name: "Mix tag", Pool: "mix"})
 
-	got := decode[[]pickerItem](t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates", nil))
-	if len(got) != 2 || got[0].URL != "https://art/"+a.ID || got[0].Preview != "api/artwork/preview?url=https%3A%2F%2Fart%2F"+a.ID {
-		t.Fatalf("entry candidates %+v", got)
+	page := decode[pickerPageResponse](t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates", nil))
+	if got := page.Items; len(got) != 2 || page.Next != pickerPage || got[0].URL != "https://art/"+a.ID || got[0].Preview != "api/artwork/preview?url=https%3A%2F%2Fart%2F"+a.ID {
+		t.Fatalf("entry candidates %+v", page)
 	}
+	page = decode[pickerPageResponse](t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates?offset=12", nil))
+	if len(page.Items) != 1 || page.Next != -1 {
+		t.Fatalf("second page %+v", page)
+	}
+	wantJSONError(t, e.do(t, "GET", "/api/tags/"+a.ID+"/artwork/candidates?offset=-1", nil), http.StatusBadRequest)
 	// Pool items in order; the file override previews through its tag; the
 	// name item has no art; the duplicate URL shows once.
 	for _, path := range []string{"/api/pools/mix/artwork/candidates", "/api/tags/" + pt.ID + "/artwork/candidates"} {
-		got = decode[[]pickerItem](t, e.do(t, "GET", path, nil))
+		got := decode[pickerPageResponse](t, e.do(t, "GET", path, nil)).Items
 		if len(got) != 2 || got[0].Label != "A" || got[1].URL != file || got[1].Preview != "api/tags/"+b.ID+"/artwork" {
 			t.Fatalf("%s: %+v", path, got)
 		}

@@ -1,7 +1,5 @@
 // Package registry is the tag registry (tags.yaml): validation, slugs and CRUD.
 // It implements model.EntryLookup.
-//
-// Owner: track C (docs/PLAN.md section 10).
 package registry
 
 import (

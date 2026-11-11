@@ -1,7 +1,5 @@
 // Package assets embeds static assets: Noto Sans Regular and Bold (OFL, see
 // fonts/OFL.txt), with Cyrillic coverage.
-//
-// Owner: track B (docs/PLAN.md section 10).
 package assets
 
 import "embed"

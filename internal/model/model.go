@@ -1,11 +1,8 @@
-// Package model holds the types and interfaces shared by all work tracks.
+// Package model holds the types and interfaces shared by all packages.
 //
-// Owner: phase 0. Read-only for tracks A, B, C and D (docs/PLAN.md section 10).
-// Change it only by updating docs/PLAN.md section 5 first.
-//
-// YAML and JSON keys match the files in docs/PLAN.md section 4. Pointer fields
-// have no omitempty on purpose: a nil pointer means "use the default" and is
-// written as an explicit null, so files keep the shape shown in the plan.
+// YAML and JSON keys match the files in examples/ and nfc_player/DOCS.md.
+// Pointer fields have no omitempty on purpose: a nil pointer means "use the
+// default" and is written as an explicit null, so files keep their shape.
 package model
 
 import (
@@ -167,7 +164,7 @@ type Offset struct {
 	YMM float64 `yaml:"y" json:"y"`
 }
 
-// DefaultSettings returns the settings from docs/PLAN.md section 4.
+// DefaultSettings returns the settings a new install starts with.
 func DefaultSettings() Settings {
 	vol := func(v int) *int { return &v }
 	return Settings{

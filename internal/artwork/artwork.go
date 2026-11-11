@@ -1,6 +1,6 @@
 // Package artwork resolves, downloads, caches and square-crops entry artwork.
 //
-// Owner: track B (docs/PLAN.md section 10). The resolution chain is a port of
+// The resolution chain is a port of
 // docs/reference/nfc-music-labels.py:
 //
 //  1. The entry's label.artwork override: an http(s) URL, or a file path
@@ -131,8 +131,9 @@ type Cache struct {
 	failed   map[string]time.Time // when the chain last found nothing, by entry key
 	now      func() time.Time     // clock; tests replace it
 
-	candMu     sync.Mutex
-	candidates map[string]candidateSet // art picker results, by entry key
+	candMu    sync.Mutex
+	pageSets  map[string]linkSet    // art picker: ranked links, by page URL
+	linkCache map[string]linkResult // art picker: image of a linked page
 }
 
 // flight is one resolution that concurrent callers for the same key wait on.

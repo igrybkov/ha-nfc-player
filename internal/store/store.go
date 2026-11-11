@@ -1,7 +1,5 @@
 // Package store keeps one YAML document per file, with atomic writes (temp
 // file, fsync, rename) under a mutex and reload when the file changes.
-//
-// Owner: track C (docs/PLAN.md section 10).
 package store
 
 import (

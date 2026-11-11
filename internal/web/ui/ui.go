@@ -1,6 +1,4 @@
 // Package ui embeds the static UI (HTML, CSS, vanilla JS modules).
-//
-// Owner: track C (docs/PLAN.md section 10).
 package ui
 
 import "embed"

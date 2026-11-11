@@ -13,7 +13,7 @@ import (
 )
 
 // The seed files in examples/ load through the real stores and keep the
-// values of the old automation (docs/PLAN.md section 1).
+// values of the old automation.
 
 func TestSeedTags(t *testing.T) {
 	f := store.Open(filepath.Join("..", "..", "examples", config.TagsFile), registry.DefaultTagsFile)

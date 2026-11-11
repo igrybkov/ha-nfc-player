@@ -16,7 +16,7 @@ func TestParse(t *testing.T) {
 		id      string
 		country string
 	}{
-		// The Music Map from docs/PLAN.md section 1.
+		// The Music Map of the old automation.
 		{"metallica playlist", "https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5", KindPlaylist, "pl.e55da0d4a18140e3b1120339e2608aa5", "us"},
 		{"disturbed album", "https://music.apple.com/us/album/divisive/1646032515", KindAlbum, "1646032515", "us"},
 		{"ccr playlist", "https://music.apple.com/us/playlist/creedence-clearwater-revival-essentials/pl.a64e22c649a64385b037a8f1a1559cb1", KindPlaylist, "pl.a64e22c649a64385b037a8f1a1559cb1", "us"},

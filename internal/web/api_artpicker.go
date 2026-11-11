@@ -17,7 +17,7 @@ import (
 // ArtPicker finds the images the art picker offers. *artwork.Cache
 // satisfies it.
 type ArtPicker interface {
-	Candidates(ctx context.Context, e model.Entry) ([]artwork.Candidate, error)
+	Candidates(ctx context.Context, e model.Entry, offset, limit int) (artwork.CandidatePage, error)
 	SourceURL(ctx context.Context, e model.Entry) (string, error)
 	Preview(ctx context.Context, u string) (image.Image, error)
 }
@@ -25,13 +25,23 @@ type ArtPicker interface {
 // pickerTimeout bounds one candidates request: artist pages are slow.
 const pickerTimeout = 25 * time.Second
 
+// pickerPage is how many linked items one candidates request looks up.
+const pickerPage = 12
+
 // maxPoolCandidates caps how many pool items the picker looks up.
-const maxPoolCandidates = 24
+const maxPoolCandidates = 100
 
 // pickerItem is a candidate plus the URL the UI shows it with.
 type pickerItem struct {
 	artwork.Candidate
 	Preview string `json:"preview"`
+}
+
+// pickerPageResponse is one page of the picker. Next is the offset to ask
+// for next, or -1 at the end.
+type pickerPageResponse struct {
+	Items []pickerItem `json:"items"`
+	Next  int          `json:"next"`
 }
 
 // previewPath is the picker thumbnail of an image URL.
@@ -45,25 +55,32 @@ func (s *Server) tagArtCandidates(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, r, err)
 		return
 	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if offset, err = strconv.Atoi(v); err != nil || offset < 0 {
+			s.writeErr(w, r, badRequest("offset must be a number from 0"))
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), pickerTimeout)
 	defer cancel()
 	if e.Pool != "" {
 		p, ok := s.deps.Pools.Pool(e.Pool)
-		if !ok {
-			writeJSON(w, http.StatusOK, []pickerItem{})
+		if !ok || offset > 0 {
+			writeJSON(w, http.StatusOK, pickerPageResponse{Items: []pickerItem{}, Next: -1})
 			return
 		}
-		writeJSON(w, http.StatusOK, s.poolCandidates(ctx, p))
+		writeJSON(w, http.StatusOK, pickerPageResponse{Items: s.poolCandidates(ctx, p), Next: -1})
 		return
 	}
-	cands, err := s.deps.ArtPicker.Candidates(ctx, e)
+	page, err := s.deps.ArtPicker.Candidates(ctx, e, offset, pickerPage)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "art lookup: "+err.Error())
 		return
 	}
-	out := make([]pickerItem, 0, len(cands))
-	for _, c := range cands {
-		out = append(out, pickerItem{Candidate: c, Preview: previewPath(c.URL)})
+	out := pickerPageResponse{Items: make([]pickerItem, 0, len(page.Items)), Next: page.Next}
+	for _, c := range page.Items {
+		out.Items = append(out.Items, pickerItem{Candidate: c, Preview: previewPath(c.URL)})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -76,7 +93,7 @@ func (s *Server) poolArtCandidates(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), pickerTimeout)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.poolCandidates(ctx, p))
+	writeJSON(w, http.StatusOK, pickerPageResponse{Items: s.poolCandidates(ctx, p), Next: -1})
 }
 
 // poolCandidates offers the art of each pool item, in item order. A tag

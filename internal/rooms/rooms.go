@@ -1,6 +1,4 @@
 // Package rooms resolves an HA area to its player entities and volume.
-//
-// Owner: track A (docs/PLAN.md section 10).
 package rooms
 
 import (

@@ -7,7 +7,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// planSettings is the settings.yaml example from docs/PLAN.md section 4.
+// planSettings is a full settings.yaml example.
 const planSettings = `
 version: 1
 readers:

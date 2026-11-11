@@ -1,7 +1,5 @@
 // Package sonos plays Apple Music and Spotify share links on native Sonos
 // media players.
-//
-// Owner: track A (docs/PLAN.md section 10).
 package sonos
 
 import (

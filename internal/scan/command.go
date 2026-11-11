@@ -18,7 +18,7 @@ import (
 )
 
 // Play and stop commands come from nfc_player_play / nfc_player_stop events
-// and from the web UI (docs/PLAN.md section 13). They share the per-area
+// and from the web UI. They share the per-area
 // lock with tag scans: the lock key is the area id, or "entity:<id>" for a
 // player entity without an area.
 

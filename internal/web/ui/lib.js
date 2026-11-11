@@ -288,13 +288,20 @@ export function openPDF(job) {
 // sized adds a size (px) to a picker preview URL.
 export const sized = (preview, size) => `${preview}${preview.includes('?') ? '&' : '?'}size=${size}`;
 
-// artPicker offers images for an artwork field: the media's cover, its
-// artists, or a pool's item art. A pick fills input with the image URL and
-// calls onPick with a preview URL; "Automatic" clears the input. Nothing
-// saves until the form does. Candidates load on the first open.
+// artPicker offers images for an artwork field: the media's cover, then
+// the artists, albums and playlists its page links to, or a pool's item
+// art. More load as the grid scrolls into view; an image already shown is
+// not shown again. A pick fills input with the image URL and calls onPick
+// with a preview URL; "Automatic" clears the input. Nothing saves until
+// the form does.
 export function artPicker({ path, input, onPick }) {
-  const grid = h('div', { class: 'picks', hidden: true });
+  const grid = h('div', { class: 'picks' });
   const status = h('p', { class: 'muted small', hidden: true });
+  const sentinel = h('div', { 'aria-hidden': 'true' });
+  const box = h('div', { class: 'picks-box', hidden: true }, grid, sentinel);
+  const shown = new Set();
+  let next = 0; // offset of the next page; -1 = all loaded
+  let loading = false;
   const mark = () => {
     for (const b of grid.querySelectorAll('button')) {
       b.setAttribute('aria-pressed', String(b.dataset.url === input.value.trim()));
@@ -305,28 +312,40 @@ export function artPicker({ path, input, onPick }) {
     onclick: () => { input.value = url; onPick(preview); mark(); },
   }, preview ? h('img', { src: sized(preview, 192), alt: '', loading: 'lazy', width: 96, height: 96 }) : h('span', { class: 'pick-auto', text: 'Auto' }),
   h('span', { class: 'small', text: label }));
-  let loaded = false;
-  const toggle = h('button', { type: 'button', text: 'Choose image…', onclick: (ev) => {
-    const open = grid.hidden;
-    grid.hidden = !open;
-    status.hidden = !open || loaded;
-    if (!open || loaded) return;
-    status.textContent = 'Looking for images…';
-    run(ev.currentTarget, async () => {
-      try {
-        const cands = await get(path);
-        loaded = true;
-        grid.replaceChildren(tile('', null, 'Automatic'),
-          ...cands.map((c) => tile(c.url, c.preview, c.kind === 'cover' ? 'Cover' : c.label)));
-        status.textContent = cands.length ? '' : 'No images found.';
-        status.hidden = cands.length > 0;
-        mark();
-      } catch (e) {
-        status.textContent = e.message;
-        throw e;
+  const say = (text) => { status.textContent = text; status.hidden = !text; };
+
+  async function more() {
+    if (loading || next < 0) return;
+    loading = true;
+    say(shown.size ? 'Loading more…' : 'Looking for images…');
+    try {
+      const sep = path.includes('?') ? '&' : '?';
+      const page = await get(`${path}${sep}offset=${next}`);
+      for (const c of page.items) {
+        if (shown.has(c.url)) continue;
+        shown.add(c.url);
+        grid.append(tile(c.url, c.preview, c.kind === 'cover' ? 'Cover' : c.label));
       }
-    });
+      next = page.next;
+      mark();
+      say(next < 0 && !shown.size ? 'No images found.' : '');
+    } catch (e) {
+      say(e.message);
+      next = -1;
+    } finally {
+      loading = false;
+    }
+    // A short page leaves the sentinel in view, which fires no new event.
+    if (next >= 0 && !box.hidden && sentinel.getBoundingClientRect().top < box.getBoundingClientRect().bottom + 200) more();
+  }
+  const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) more(); }, { root: box, rootMargin: '200px' });
+
+  const toggle = h('button', { type: 'button', text: 'Choose image…', onclick: () => {
+    box.hidden = !box.hidden;
+    if (box.hidden) { io.disconnect(); return; }
+    if (!grid.childElementCount) grid.append(tile('', null, 'Automatic'));
+    io.observe(sentinel);
   } });
   input.addEventListener('input', mark);
-  return h('div', { class: 'stack' }, toggle, status, grid);
+  return h('div', { class: 'stack' }, toggle, box, status);
 }

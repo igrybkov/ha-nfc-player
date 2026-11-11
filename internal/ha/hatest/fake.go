@@ -1,6 +1,4 @@
 // Package hatest provides an in-memory ha.Client for tests.
-//
-// Owner: track A (docs/PLAN.md section 10).
 package hatest
 
 import (

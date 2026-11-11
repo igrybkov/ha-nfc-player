@@ -1,8 +1,6 @@
 // Package scan handles tag_scanned events (event, entry, room, router) and
 // the nfc_player_play / nfc_player_stop events. It also implements
 // model.ScanLog and model.PlayService.
-//
-// Owner: track A (docs/PLAN.md section 10).
 package scan
 
 import (

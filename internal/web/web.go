@@ -1,6 +1,4 @@
 // Package web is the HTTP server: JSON API, embedded UI and Ingress handling.
-//
-// Owner: track C (docs/PLAN.md section 10).
 package web
 
 import (

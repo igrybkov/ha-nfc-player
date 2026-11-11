@@ -1,7 +1,5 @@
 // Package catalog parses music URLs (Apple Music and Spotify share links and
 // provider URIs), builds share URLs and looks up songs in the iTunes API.
-//
-// Owner: track A (docs/PLAN.md section 10). Track B calls Parse.
 package catalog
 
 import (

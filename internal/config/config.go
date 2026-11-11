@@ -1,8 +1,6 @@
 // Package config loads runtime config (env and /data/options.json) and serves
 // settings.yaml as a model.SettingsSource. It also serves the user label
 // templates and backgrounds merged with the built-ins.
-//
-// Owner: track C (docs/PLAN.md section 10).
 package config
 
 import (
