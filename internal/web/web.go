@@ -47,8 +47,8 @@ type Deps struct {
 	Artwork     model.ArtworkSource
 	HATags      TagLister
 	ArtPicker   ArtPicker // nil = no art picker (routes answer 503)
-	Labels      Labels // nil = package labels
-	Supervisor  bool   // accept only 172.30.32.2 and localhost
+	Labels      Labels    // nil = package labels
+	Supervisor  bool      // accept only 172.30.32.2 and localhost
 	Logger      *slog.Logger
 }
 
