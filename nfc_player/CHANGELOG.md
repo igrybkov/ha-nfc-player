@@ -11,6 +11,8 @@
 - Label title and subtitle hints show exactly what prints, or nothing.
 - Area lists show only areas with a speaker.
 - Records are sorted by name everywhere.
+- A search list marks its first row only while you type in it, so nothing
+  looks picked before you choose.
 
 ## 0.4.0
 

@@ -98,6 +98,9 @@ legend { padding: 0 4px; font-weight: 600; }
 .list li { padding: 8px 12px; border-top: 1px solid var(--line); cursor: pointer; }
 .list li:first-child { border-top: none; }
 .list li.active { background: color-mix(in srgb, var(--primary) 16%, transparent); }
+/* The keyboard cursor shows only while its search box is in use, so an
+   idle list doesn't look like something is already picked. */
+.search-list:not(:focus-within) .list li.active { background: transparent; }
 .list li.empty { cursor: default; color: var(--muted); }
 .list.plain li { cursor: default; }
 .search-list .list { max-height: 65vh; overflow-y: auto; }
