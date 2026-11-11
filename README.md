@@ -116,14 +116,15 @@ in the previews come from `assets/samples/gen.go`.
 
 1. Set `version` in `nfc_player/config.yaml` and add a section for it in
    `nfc_player/CHANGELOG.md` (`## X.Y.Z`).
-2. Commit and push to `main`. Wait for CI to pass.
-3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+2. Commit and push to `main`.
 
-The release workflow checks that the tag matches `version`. Then it pushes
-one multi-arch image (`linux/amd64`, `linux/arm64`):
-`ghcr.io/igrybkov/ha-nfc-player:X.Y.Z` and `:latest`.
-
-It also creates a GitHub release with the notes from the changelog.
+Do not push tags. On each push to `main`, the release workflow checks
+whether `vX.Y.Z` exists. If not, it runs the CI checks and pushes one
+multi-arch image (`linux/amd64`, `linux/arm64`):
+`ghcr.io/igrybkov/ha-nfc-player:X.Y.Z` and `:latest`. Only then does it
+create the tag and a GitHub release with the notes from the changelog. A
+failed build leaves no tag: fix it, push again, or rerun the workflow by
+hand.
 
 **First release only.** GHCR may create the package as private. Open it on
 GitHub (Packages → ha-nfc-player → Package settings → Change visibility)
