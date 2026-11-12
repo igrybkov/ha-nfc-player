@@ -14,6 +14,7 @@ rooms:
     master_bathroom: {volume: 25, sonos_entity: null, ma_entity: null}
     master_bedroom: {volume: 25, sonos_entity: null, ma_entity: null}
   sonos_model_preference: [Arc, Five, One, Port]
+  unmute_on_play: true # unmute the speaker before music starts; null = true
 music_assistant:
   config_entry_id: null
 print:

@@ -162,13 +162,14 @@ func TestEndToEnd(t *testing.T) {
 	}); n != 1 {
 		t.Fatalf("event reached %d connections", n)
 	}
-	waitFor(t, "seven service calls", func() bool { return len(fake.ServiceCalls()) >= 7 })
+	waitFor(t, "eight service calls", func() bool { return len(fake.ServiceCalls()) >= 8 })
 
 	target := &ha.Target{EntityID: []string{"media_player.office"}}
 	url := "https://music.apple.com/us/playlist/metallica-essentials/pl.e55da0d4a18140e3b1120339e2608aa5"
 	want := []hatest.ServiceCall{
 		{Domain: "media_player", Service: "media_stop", Target: target},
 		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.15}, Target: target},
+		{Domain: "media_player", Service: "volume_mute", Data: map[string]any{"is_volume_muted": false}, Target: target},
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target},
 		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": url, "media_content_type": "music"}, Target: target},
@@ -228,11 +229,12 @@ func TestEndToEndPlayEvents(t *testing.T) {
 	// Values as an HA template renders them.
 	url := "https://music.apple.com/us/album/divisive/1646032515"
 	srv.Emit(scan.PlayEventType, map[string]any{"area": "office", "media": url, "volume": "40", "shuffle": "false", "pool": ""})
-	waitFor(t, "seven service calls", func() bool { return len(fake.ServiceCalls()) >= 7 })
+	waitFor(t, "eight service calls", func() bool { return len(fake.ServiceCalls()) >= 8 })
 	target := &ha.Target{EntityID: []string{"media_player.office"}}
 	want := []hatest.ServiceCall{
 		{Domain: "media_player", Service: "media_stop", Target: target},
 		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.4}, Target: target},
+		{Domain: "media_player", Service: "volume_mute", Data: map[string]any{"is_volume_muted": false}, Target: target},
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "all"}, Target: target},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": false}, Target: target},
 		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": url, "media_content_type": "music"}, Target: target},
@@ -245,8 +247,8 @@ func TestEndToEndPlayEvents(t *testing.T) {
 
 	// Stop with nothing playing stops the Sonos entity.
 	srv.Emit(scan.StopEventType, map[string]any{"area": "office"})
-	waitFor(t, "media_stop", func() bool { return len(fake.ServiceCalls()) >= 8 })
-	if c := fake.ServiceCalls()[7]; c.Service != "media_stop" || !reflect.DeepEqual(c.Target, target) {
+	waitFor(t, "media_stop", func() bool { return len(fake.ServiceCalls()) >= 9 })
+	if c := fake.ServiceCalls()[8]; c.Service != "media_stop" || !reflect.DeepEqual(c.Target, target) {
 		t.Errorf("stop call = %+v", c)
 	}
 	var scans []model.Scan

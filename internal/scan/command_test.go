@@ -71,6 +71,7 @@ func TestPlayEventSequence(t *testing.T) {
 	wantCalls := []hatest.ServiceCall{
 		{Domain: "media_player", Service: "media_stop", Target: target},
 		{Domain: "media_player", Service: "volume_set", Data: map[string]any{"volume_level": 0.35}, Target: target},
+		{Domain: "media_player", Service: "volume_mute", Data: map[string]any{"is_volume_muted": false}, Target: target},
 		{Domain: "media_player", Service: "repeat_set", Data: map[string]any{"repeat": "one"}, Target: target},
 		{Domain: "media_player", Service: "shuffle_set", Data: map[string]any{"shuffle": true}, Target: target},
 		{Domain: "media_player", Service: "play_media", Data: map[string]any{"media_content_id": metallicaURL, "media_content_type": "music"}, Target: target},
@@ -245,8 +246,8 @@ func TestPlayEventEntityWithoutArea(t *testing.T) {
 	if v := volumeOf(t, calls); v != 0.15 {
 		t.Errorf("volume = %v, want default 0.15", v)
 	}
-	if calls[1].Data["radio_mode"] != true {
-		t.Errorf("play_media = %v, want radio_mode", calls[1].Data)
+	if calls[2].Data["radio_mode"] != true {
+		t.Errorf("play_media = %v, want radio_mode", calls[2].Data)
 	}
 }
 

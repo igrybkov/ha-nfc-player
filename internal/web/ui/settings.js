@@ -50,6 +50,7 @@ export async function render(view) {
   // 0 in settings.yaml reads as unset and becomes 15, so the minimum is 1.
   const defaultVolume = num(s.rooms.default_volume, { min: 1, max: 100, step: 1 });
   const sonosPref = h('input', { value: s.rooms.sonos_model_preference.join(', ') });
+  const unmute = h('input', { type: 'checkbox', checked: s.rooms.unmute_on_play ?? true });
   const integrations = h('input', { value: s.readers.integrations.join(', ') });
   const maEntry = h('input', { value: s.music_assistant.config_entry_id ?? '', placeholder: 'auto-detect' });
   const inset = num(s.print.inset_mm, { min: 0, max: 10, step: 0.1 });
@@ -79,7 +80,7 @@ export async function render(view) {
       ...s,
       readers: { integrations: list(integrations.value) },
       players: { default: chain, fallback: fallback.checked },
-      rooms: { default_volume: readNum(defaultVolume) ?? 0, areas: areasOut, sonos_model_preference: list(sonosPref.value) },
+      rooms: { default_volume: readNum(defaultVolume) ?? 0, areas: areasOut, sonos_model_preference: list(sonosPref.value), unmute_on_play: unmute.checked },
       music_assistant: { config_entry_id: maEntry.value.trim() || null },
       // default_theme is set on the Themes screen; keep it.
       print: { ...s.print, offsets, inset_mm: readNum(inset) ?? 0, bleed_mm: readNum(bleed) ?? 0, edge_bleed_mm: readNum(edge) ?? 0, outer_bleed_mm: readNum(outer) ?? 0 },
@@ -101,7 +102,8 @@ export async function render(view) {
       h('thead', {}, h('tr', {}, ['Area', 'Volume %', 'Sonos entity', 'Music Assistant entity'].map((c) => h('th', { text: c })))),
       h('tbody', {}, areaRows.length ? areaRows.map((r) => r.tr) : h('tr', {}, h('td', { colspan: 4, class: 'muted', text: 'No areas.' }))))),
     h('p', { class: 'muted small', text: 'Leave a field empty to use the default. Placeholders show what is found in HA.' }),
-    field('Sonos model preference', sonosPref, 'Comma-separated, best first.')),
+    field('Sonos model preference', sonosPref, 'Comma-separated, best first.'),
+    h('label', { class: 'check' }, unmute, ' Unmute the speaker when music starts')),
   h('fieldset', {}, h('legend', { text: 'Players' }),
     chainList, addPlayer,
     h('label', { class: 'check' }, fallback, ' On error, try the next player'),

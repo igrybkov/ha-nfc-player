@@ -147,6 +147,13 @@ type RoomSettings struct {
 	DefaultVolume        int                     `yaml:"default_volume" json:"default_volume"`
 	Areas                map[string]AreaSettings `yaml:"areas" json:"areas"` // key: HA area_id
 	SonosModelPreference []string                `yaml:"sonos_model_preference" json:"sonos_model_preference"`
+	// UnmuteOnPlay unmutes the speaker before music starts; nil = true.
+	UnmuteOnPlay *bool `yaml:"unmute_on_play" json:"unmute_on_play"`
+}
+
+// Unmute returns UnmuteOnPlay, or true when unset.
+func (r RoomSettings) Unmute() bool {
+	return r.UnmuteOnPlay == nil || *r.UnmuteOnPlay
 }
 
 // AreaSettings overrides room defaults for one HA area.

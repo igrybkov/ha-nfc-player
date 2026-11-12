@@ -233,8 +233,8 @@ func TestScanPlaysByName(t *testing.T) {
 	if v := volumeOf(t, calls); v != 0.30 {
 		t.Errorf("volume = %v, want area volume 0.30", v)
 	}
-	if calls[3].Service != "shuffle_set" || calls[3].Data["shuffle"] != true {
-		t.Errorf("shuffle call = %+v", calls[3])
+	if calls[4].Service != "shuffle_set" || calls[4].Data["shuffle"] != true {
+		t.Errorf("shuffle call = %+v", calls[4])
 	}
 }
 
@@ -252,8 +252,8 @@ func TestScanMatchesNameNotTagID(t *testing.T) {
 	if pm := playMedia(calls); len(pm) != 1 || pm[0].Data["media_content_id"] != queenURL {
 		t.Errorf("play_media = %+v", pm)
 	}
-	if calls[2].Data["repeat"] != "one" {
-		t.Errorf("repeat = %v", calls[2].Data["repeat"])
+	if calls[3].Data["repeat"] != "one" {
+		t.Errorf("repeat = %v", calls[3].Data["repeat"])
 	}
 }
 
@@ -646,5 +646,41 @@ func TestScanPlaysNestedRecord(t *testing.T) {
 		return c.Service == "shuffle_set" && c.Data["shuffle"] == false
 	}) {
 		t.Errorf("no shuffle off: %v", calls)
+	}
+}
+
+// rooms.unmute_on_play is on by default; turned off, a scan leaves the
+// speaker's mute alone.
+func TestScanUnmuteSetting(t *testing.T) {
+	mutes := func(calls []hatest.ServiceCall) int {
+		n := 0
+		for _, c := range calls {
+			if c.Service == "volume_mute" {
+				n++
+				if c.Data["is_volume_muted"] != false {
+					t.Errorf("volume_mute data = %v", c.Data)
+				}
+			}
+		}
+		return n
+	}
+
+	hs := start(t, fakeHA())
+	hs.scan("tag-1", "Metallica — Essential", "reader-fr")
+	hs.waitScans(t, 1)
+	if n := mutes(hs.f.ServiceCalls()); n != 1 {
+		t.Errorf("default: %d volume_mute calls, want 1", n)
+	}
+
+	off := false
+	f := fakeHA()
+	hs = startWith(t, f, f, func(h *Handler) {
+		s := h.deps.Settings.(*settings)
+		s.s.Rooms.UnmuteOnPlay = &off
+	})
+	hs.scan("tag-1", "Metallica — Essential", "reader-fr")
+	hs.waitScans(t, 1)
+	if n := mutes(hs.f.ServiceCalls()); n != 0 {
+		t.Errorf("off: %d volume_mute calls, want 0", n)
 	}
 }

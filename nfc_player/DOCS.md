@@ -23,6 +23,10 @@ plays, and prints labels for them.
    only: Music Assistant can't play them.
 6. Volume: the area's volume (else the default volume), plus the record's
    volume offset.
+7. If the speaker is muted, the app unmutes it before the music starts. A
+   mute from the TV remote stays on a soundbar after the TV turns off.
+   Turn this off with **Unmute the speaker when music starts** in
+   **Settings** (`rooms.unmute_on_play`, on by default).
 
 ## Setup
 
@@ -116,9 +120,9 @@ Content-Security-Policy and can only be framed by Home Assistant itself.
 - **Templates** and **Themes**: the built-ins are read-only. Duplicate
   one to make your own. **Make default** on a theme makes the Print
   screen start with it (white until you pick one).
-- **Settings**: default volume (1 to 100), per-area volume (0 to 100), Sonos
-  and Music Assistant entity per area, player order and fallback, reader
-  integrations, print inset and bleed (outer bleed adds fill on the
+- **Settings**: default volume (1 to 100), per-area volume (0 to 100),
+  unmute on play (on by default), Sonos and Music Assistant entity per
+  area, player order and fallback, reader integrations, print inset and bleed (outer bleed adds fill on the
   paper-edge side of the first and last columns).
 
 ## Records and play events

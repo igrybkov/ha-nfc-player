@@ -257,3 +257,24 @@ func TestPlayStationNoAccount(t *testing.T) {
 		t.Errorf("calls = %+v, want none: the current music stays", f.Calls)
 	}
 }
+
+// Unmute adds volume_mute off right after volume_set, for albums and
+// stations alike.
+func TestPlayUnmute(t *testing.T) {
+	mute := hatest.ServiceCall{Domain: "media_player", Service: "volume_mute", Data: map[string]any{"is_volume_muted": false}, Target: target()}
+	for _, url := range []string{
+		"https://music.apple.com/us/album/divisive/1646032515",
+		"https://music.apple.com/us/station/classic-rock-station/ra.985500514",
+	} {
+		f := &hatest.Fake{StateList: []ha.State{
+			{EntityID: "media_player.office", Attributes: map[string]any{"media_content_id": "x-sonos-http:song%3a1.mp4?sid=204&flags=8232&sn=7"}},
+		}}
+		req := player.Request{Media: mustParse(t, url), Area: familyRoom, Volume: 20, Unmute: true}
+		if err := New(f, nil).Play(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.Calls) < 3 || f.Calls[1].Service != "volume_set" || !reflect.DeepEqual(f.Calls[2], mute) {
+			t.Errorf("%s: calls = %+v", url, f.Calls)
+		}
+	}
+}

@@ -327,3 +327,16 @@ func TestRouterQueryOnSonos(t *testing.T) {
 		t.Errorf("media_content_id = %v", got)
 	}
 }
+
+func TestPlayUnmute(t *testing.T) {
+	f := &hatest.Fake{}
+	m, _ := catalog.Parse("https://music.apple.com/us/album/divisive/1646032515")
+	req := player.Request{Media: m, Area: office, Volume: 20, Unmute: true}
+	if err := New(f, defaults()).Play(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	want := hatest.ServiceCall{Domain: "media_player", Service: "volume_mute", Data: map[string]any{"is_volume_muted": false}, Target: maTarget()}
+	if len(f.Calls) < 3 || f.Calls[0].Service != "volume_set" || !reflect.DeepEqual(f.Calls[1], want) || f.Calls[2].Service != "play_media" {
+		t.Errorf("calls = %+v", f.Calls)
+	}
+}

@@ -415,7 +415,8 @@ func (h *Handler) playJob(ctx context.Context, a rooms.Area, j job, radio bool) 
 		st.offset = firstSet(st.offset, l.offset)
 		st.player = firstSet(st.player, l.player)
 	}
-	req := player.Request{Media: j.media, Query: j.query, Area: a, Volume: a.Volume, Repeat: string(model.RepeatAll), Radio: radio}
+	req := player.Request{Media: j.media, Query: j.query, Area: a, Volume: a.Volume, Repeat: string(model.RepeatAll), Radio: radio,
+		Unmute: h.deps.Settings.Settings().Rooms.Unmute()}
 	if st.shuffle != nil {
 		req.Shuffle = *st.shuffle
 	}

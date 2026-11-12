@@ -30,6 +30,7 @@ type Request struct {
 	Shuffle bool
 	Repeat  string // off | one | all
 	Radio   bool   // Music Assistant radio mode; players that can't do it don't Support the request
+	Unmute  bool   // unmute the speaker before the music starts
 }
 
 // Player plays media on one kind of speaker.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2
+
+- A scan now unmutes the speaker before the music starts. Before, a
+  soundbar muted from the TV remote played the music in silence. Turn
+  this off in **Settings** with **Unmute the speaker when music starts**
+  (`rooms.unmute_on_play`, on by default).
+
 ## 0.5.1
 
 The tag v0.5.0 failed its build and was never released; 0.5.1 is that

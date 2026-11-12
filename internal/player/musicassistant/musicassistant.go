@@ -48,10 +48,10 @@ func (p *Player) Supports(req player.Request) bool {
 	return req.Query != nil || req.Media.URI() != ""
 }
 
-// Play resolves a Query if needed, then runs volume_set, play_media
-// (enqueue replace, radio_mode when asked), shuffle_set and repeat_set on
-// the MA entity. Volume goes first so the music never starts at the
-// previous level.
+// Play resolves a Query if needed, then runs volume_set, volume_mute off
+// (when asked), play_media (enqueue replace, radio_mode when asked),
+// shuffle_set and repeat_set on the MA entity. Volume goes first so the
+// music never starts at the previous level.
 func (p *Player) Play(ctx context.Context, req player.Request) error {
 	if !p.Supports(req) {
 		return fmt.Errorf("music assistant: unsupported request (kind %q, entity %q)", req.Media.Kind, req.Area.MAEntity)
@@ -77,15 +77,19 @@ func (p *Player) Play(ctx context.Context, req player.Request) error {
 	if req.Radio {
 		play["radio_mode"] = true
 	}
-	steps := []struct {
+	type step struct {
 		domain, service string
 		data            map[string]any
-	}{
-		{"media_player", "volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}},
-		{"music_assistant", "play_media", play},
-		{"media_player", "shuffle_set", map[string]any{"shuffle": req.Shuffle}},
-		{"media_player", "repeat_set", map[string]any{"repeat": repeat}},
 	}
+	steps := []step{{"media_player", "volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}}}
+	if req.Unmute {
+		steps = append(steps, step{"media_player", "volume_mute", map[string]any{"is_volume_muted": false}})
+	}
+	steps = append(steps,
+		step{"music_assistant", "play_media", play},
+		step{"media_player", "shuffle_set", map[string]any{"shuffle": req.Shuffle}},
+		step{"media_player", "repeat_set", map[string]any{"repeat": repeat}},
+	)
 	for _, s := range steps {
 		if _, err := p.ha.CallService(ctx, s.domain, s.service, s.data, target, false); err != nil {
 			return fmt.Errorf("music assistant: %w", err)

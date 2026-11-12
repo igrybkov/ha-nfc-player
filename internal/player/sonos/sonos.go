@@ -58,9 +58,9 @@ func (p *Player) Supports(req player.Request) bool {
 }
 
 // Play runs the sequence of the old play_music_in_a_room script:
-// media_stop, volume_set, repeat_set, shuffle_set, play_media. An artist
-// becomes a queue of its songs: the first replaces the queue, the rest are
-// added. The song lookup runs before media_stop, so a failed lookup leaves
+// media_stop, volume_set, volume_mute (when asked), repeat_set,
+// shuffle_set, play_media. An artist becomes a queue of its songs: the
+// first replaces the queue, the rest are added. The song lookup runs before media_stop, so a failed lookup leaves
 // the current music alone.
 //
 // Sonos starts a new queue at its first track even in shuffle mode, and a
@@ -100,10 +100,7 @@ func (p *Player) Play(ctx context.Context, req player.Request) error {
 		{"repeat_set", map[string]any{"repeat": repeat}},
 		{"shuffle_set", map[string]any{"shuffle": req.Shuffle}},
 	}
-	steps := append([]step{
-		{"media_stop", nil},
-		{"volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}},
-	}, modes...)
+	steps := append(volume(req, step{"media_stop", nil}), modes...)
 	if err := p.run(ctx, target, steps); err != nil {
 		return err
 	}
@@ -127,6 +124,17 @@ func (p *Player) Play(ctx context.Context, req player.Request) error {
 type step struct {
 	service string
 	data    map[string]any
+}
+
+// volume returns the steps before it, then volume_set, then volume_mute
+// off when req.Unmute is set. A speaker muted from the TV remote stays
+// muted after the TV turns off, so a scan would play in silence.
+func volume(req player.Request, before ...step) []step {
+	out := append(before, step{"volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}})
+	if req.Unmute {
+		out = append(out, step{"volume_mute", map[string]any{"is_volume_muted": false}})
+	}
+	return out
 }
 
 func (p *Player) run(ctx context.Context, target *ha.Target, steps []step) error {
@@ -162,11 +170,9 @@ func (p *Player) playStation(ctx context.Context, req player.Request) error {
 	// [A-Za-z0-9._-] in a station id, so it needs no escaping.
 	uri := "x-sonosapi-radio:radio%3a" + req.Media.ID + "?sid=" + appleMusicSID + "&flags=8300&sn=" + sn
 	target := &ha.Target{EntityID: []string{req.Area.SonosEntity}}
-	return p.run(ctx, target, []step{
-		{"media_stop", nil},
-		{"volume_set", map[string]any{"volume_level": float64(req.Volume) / 100}},
-		{"play_media", map[string]any{"media_content_id": uri, "media_content_type": "music"}},
-	})
+	steps := append(volume(req, step{"media_stop", nil}),
+		step{"play_media", map[string]any{"media_content_id": uri, "media_content_type": "music"}})
+	return p.run(ctx, target, steps)
 }
 
 // account returns the Apple Music account number from the media URI of any
